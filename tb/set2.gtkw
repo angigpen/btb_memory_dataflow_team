@@ -1,0 +1,31 @@
+[*] GTKWave view for Set 2 (all phases).  Open: gtkwave out/wave_s2_all_rectangular.vcd tb/set2.gtkw
+@28
+tb_local.clk
+@24
+tb_local.cyc[31:0]
+@200
+-gemm_control
+@24
+tb_local.dut.control.req_kk[15:0]
+@28
+tb_local.dut.control.req_reuse_a
+tb_local.dut.control.req_reuse_b
+@200
+-memory port
+@28
+tb_local.mem_req_valid
+tb_local.mem_req_is_b
+@24
+tb_local.mem_req_addr[31:0]
+@28
+tb_local.mem_rsp_valid
+@200
+-operand_loader (slots, requests in flight)
+@24
+tb_local.dut.loader.alloc[3:0]
+tb_local.dut.loader.prep[3:0]
+tb_local.dut.loader.ip[1:0]
+tb_local.dut.loader.out_cnt[5:0]
+@28
+tb_local.dut.loader.op_valid
+tb_local.dut.loader.op_ready

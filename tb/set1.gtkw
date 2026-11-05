@@ -1,0 +1,33 @@
+[*] GTKWave view for Set 1 (Phase 1 + 2a).  Open: gtkwave out/wave_s1_all_rectangular.vcd tb/set1.gtkw
+@28
+tb_local.clk
+@24
+tb_local.cyc[31:0]
+@200
+-gemm_control
+@24
+tb_local.dut.control.state[1:0]
+tb_local.dut.control.req_kk[15:0]
+@28
+tb_local.dut.control.req_reuse_a
+@200
+-memory port
+@28
+tb_local.mem_req_valid
+tb_local.mem_req_is_b
+@24
+tb_local.mem_req_addr[31:0]
+@28
+tb_local.mem_rsp_valid
+@200
+-operand_loader (Ping/Pong)
+@24
+tb_local.dut.loader.state[2:0]
+@28
+tb_local.dut.loader.wr
+tb_local.dut.loader.rd
+@24
+tb_local.dut.loader.full[1:0]
+@28
+tb_local.dut.loader.op_valid
+tb_local.dut.loader.op_ready

@@ -94,6 +94,17 @@ module tb_local;
 
     integer r, t0, cycles, i;
     reg [1023:0] dir;
+    // Waveform: run with +VCD=wave.vcd and open the file in GTKWave.
+    // Only the top level, the loader and the control are dumped to keep the file small.
+    reg [1023:0] vcdfile;
+    initial if($value$plusargs("VCD=%s",vcdfile)) begin
+        $dumpfile(vcdfile);
+        $dumpvars(1, tb_local);
+        $dumpvars(1, dut);
+        $dumpvars(1, dut.loader);
+        $dumpvars(1, dut.control);
+    end
+
     initial begin
         if(!$value$plusargs("CASEDIR=%s",dir)) begin $display("need +CASEDIR"); $finish; end
         if(!$value$plusargs("MEMMAXOUT=%d",MEMMAXOUT)) MEMMAXOUT=0;

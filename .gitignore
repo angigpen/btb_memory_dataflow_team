@@ -1,0 +1,4 @@
+out/
+out_*/
+__pycache__/
+*.vcd

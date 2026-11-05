@@ -30,6 +30,16 @@ VARIANTS = {
     's2_all':         ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32)),
     's2_all_small':   ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=2, MAX_OUT=4,
                                     ACACHE_DEPTH=16, BBUF_DEPTH=64)),
+    # ---- Set 3 (grouped B reuse); BBUF_DEPTH = entries of 4 bytes ----
+    's3_all':         ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32)),
+    's3_buf1k':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=256)),
+    's3_buf2k':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=512)),
+    's3_buf8k':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=2048)),
+    's3_buf16k':      ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=4096)),
+    's3_small':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=2, MAX_OUT=4,
+                                    ACACHE_DEPTH=16, BBUF_DEPTH=64)),
+    's3_grp_test':    ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=8, BBUF_DEPTH=128)),
+    's2_buf4k':       ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=1024)),
 }
 
 BENCH = [
@@ -38,6 +48,9 @@ BENCH = [
     ('bench64_sp90_lat1',  dict(m=64, n=64, k=64, seed=12, sparsity=.9)),
     ('bench64_sp90_lat23', dict(m=64, n=64, k=64, seed=12, sparsity=.9, latency=23)),
     ('bench_lat23_stall',  dict(m=9, n=13, k=21, seed=13, latency=23, stalls=2, output_stalls=2)),
+    ('bench_64x128x128',   dict(m=64, n=128, k=128, seed=14)),
+    ('bench_64x128x128_l23', dict(m=64, n=128, k=128, seed=14, latency=23)),
+    ('bench_grp_edge',     dict(m=13, n=37, k=40, seed=15, latency=3, stalls=2, output_stalls=2, sparsity=.5)),
 ]
 
 def build(name, out):
@@ -57,6 +70,7 @@ def main():
     p.add_argument('--extended', action='store_true')
     p.add_argument('--memmaxout', type=int, default=0, help='0 = pipelined memory, 1 = one outstanding request')
     p.add_argument('--out', type=Path, default=ROOT/'out')
+    p.add_argument('--vcd', action='store_true', help='save a waveform per run: out/wave_<variant>_<case>.vcd')
     a = p.parse_args()
     vec = a.out/'vectors'; names = suite(vec, a.extended)
     for n_, kw in BENCH:                      # extra benchmark fixtures (not in the official suite)
@@ -66,7 +80,8 @@ def main():
     for v in a.variants.split(','):
         exe = build(v, a.out)
         for c in cases:
-            r = subprocess.run(['vvp','-n',str(exe),f'+CASEDIR={vec/c}',f'+MEMMAXOUT={a.memmaxout}'],
+            r = subprocess.run(['vvp','-n',str(exe),f'+CASEDIR={vec/c}',f'+MEMMAXOUT={a.memmaxout}']
+                               + ([f'+VCD={a.out}/wave_{v}_{c}.vcd'] if a.vcd else []),
                                capture_output=True, text=True, timeout=3600)
             ok = 'LOCAL PASS' in r.stdout
             for line in r.stdout.splitlines():
