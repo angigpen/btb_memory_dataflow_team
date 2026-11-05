@@ -2,10 +2,10 @@
 // Tile scheduler for C[M,N] = A[M,K] * B[K,N], row-major storage.
 // Memory/Dataflow change: loop order is unchanged (row tile -> col tile -> kk).
 // Only new OUTPUTS are added so the loader can reuse data:
-//   req_kk        : k index of this packet            (A cache address)
+//   req_kk        : k index of this packet            (A reuse buffer address)
 //   req_reuse_a   : col tile != 0 -> A for this kk was already read in col tile 0
 //   req_reuse_b   : row tile != 0 -> B for this (col tile, kk) was already read in row tile 0
-//   req_bbuf_addr : (col tile index) * K + kk          (B buffer address, Set 2 only)
+//   req_bbuf_addr : (col tile index) * K + kk          (B reuse buffer address, Set 2 only)
 //   req_last_row  : this is the last row tile -> no later row tile will reuse B (Set 2 only)
 module gemm_control #(parameter PE_ROWS=4, PE_COLS=4, MAX_M=64, MAX_N=128, MAX_K=1024)(
     input clk, rst, start,

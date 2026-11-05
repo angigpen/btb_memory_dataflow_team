@@ -3,10 +3,10 @@
 // SET 3 (Memory/Dataflow): grouped ("staged") B reuse.
 //
 // Loop order:  group -> row tile -> col tile inside the group -> kk
-//   A group is G column tiles. Their B (K x 4G bytes) is kept in the B buffer:
+//   A group is G column tiles. Their B (K x 4G bytes) is kept in the B reuse buffer:
 //     - row tile 0 of the group reads B from memory and fills the buffer
 //     - later row tiles of the group read B from the buffer
-//   A is read once per (group, row tile) and reused across the group's column tiles (A cache).
+//   A is read once per (group, row tile) and reused across the group's column tiles (A reuse buffer).
 //   Reads: A = M*K*(number of groups), B = K*N  (each B value read once)
 //
 // G is chosen at start from the buffer size:  G = floor(BBUF_DEPTH / K), capped at all col tiles.
@@ -104,7 +104,7 @@ module gemm_control #(parameter PE_ROWS=4, PE_COLS=4, MAX_M=64, MAX_N=128, MAX_K
                 WRITE: if(write_done) begin
                     kk<=0; state<=ISSUE;
                     if(col+PE_COLS<n && col+PE_COLS<grp_end) begin
-                        // next column tile inside the group: same A (cache), new B
+                        // next column tile inside the group: same A (reuse buffer), new B
                         col<=col+PE_COLS; a_ptr<=a_tile;
                         b_ptr<=col+PE_COLS; bb_base<=bb_base+k;
                     end else if(row+PE_ROWS<m) begin
@@ -113,7 +113,7 @@ module gemm_control #(parameter PE_ROWS=4, PE_COLS=4, MAX_M=64, MAX_N=128, MAX_K
                         a_tile<=a_tile+PE_ROWS*k; a_ptr<=a_tile+PE_ROWS*k;
                         c_tile<=c_tile+PE_ROWS*n; b_ptr<=grp_start; bb_base<=0;
                     end else if(grp_end<n) begin
-                        // next group: back to row tile 0, refill the B buffer
+                        // next group: back to row tile 0, refill the B reuse buffer
                         grp_start<=grp_end; grp_end<=grp_end+gw;
                         row<=0; col<=grp_end;
                         a_tile<=0; a_ptr<=0; c_tile<=0; b_ptr<=grp_end; bb_base<=0;

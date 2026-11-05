@@ -6,25 +6,25 @@
 // Same memory interface as the baseline: 1 byte per request, ONE request outstanding.
 //
 // Switches (parameters):
-//   USE_A_REUSE   1: keep A[row tile, kk] (4 bytes + zero flag) in an on-chip A cache.
-//                    col tile 0 fills the cache, later col tiles read it instead of memory.
-//   USE_ZERO_SKIP 1: (needs USE_A_REUSE) if the cached A word is all zero, the B reads for
+//   USE_A_REUSE   1: keep A[row tile, kk] (4 bytes + zero flag) in an on-chip A reuse buffer.
+//                    col tile 0 fills the reuse buffer, later col tiles read it instead of memory.
+//   USE_ZERO_SKIP 1: (needs USE_A_REUSE) if the buffered A word is all zero, the B reads for
 //                    that packet are skipped. The packet is STILL sent to the MAC with B=0,
 //                    so op_first / op_last keep the accumulation correct.
 //   USE_DBUF      1: two packet slots (Ping/Pong). The loader fills one slot while the
 //                    other slot waits for / is consumed by the MAC.
-//   ACACHE_DEPTH  number of A cache entries (one per kk). kk >= ACACHE_DEPTH falls back
+//   ABUF_DEPTH  number of A reuse buffer entries (one per kk). kk >= ABUF_DEPTH falls back
 //                 to reading A from memory, so any K still works.
 //   All switches 0  ->  same behaviour and cycle count as the baseline loader.
 //
 // Load FSM (fills slot wr):
-//   IDLE --accept--> A_CRD (A from cache, 1-cycle RAM read) --> B_REQ ... or done (zero skip)
+//   IDLE --accept--> A_BRD (A from reuse buffer, 1-cycle RAM read) --> B_REQ ... or done (zero skip)
 //                \-> A_REQ <-> A_RSP (A from memory) --> B_REQ <-> B_RSP --> done
 // Supply side (slot rd): op_valid = full[rd]; MAC handshake empties the slot.
 // =====================================================================
 module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
                         parameter USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_DBUF=1,
-                        parameter ACACHE_DEPTH=1024)(
+                        parameter ABUF_DEPTH=1024)(
     input clk,rst,
     input req_valid,output req_ready,
     input [31:0] req_a_addr,req_b_addr,input [15:0] req_a_stride,
@@ -40,10 +40,10 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     output [PE_ROWS-1:0] op_rows,output [PE_COLS-1:0] op_cols,
     output op_first,op_last,output loader_busy
 );
-    localparam IDLE=0,A_CRD=1,A_REQ=2,A_RSP=3,B_REQ=4,B_RSP=5;
+    localparam IDLE=0,A_BRD=1,A_REQ=2,A_RSP=3,B_REQ=4,B_RSP=5;
     localparam RB=(PE_ROWS>1)?$clog2(PE_ROWS):1, CB=(PE_COLS>1)?$clog2(PE_COLS):1;
     localparam NS=(USE_DBUF!=0)?2:1;                 // number of packet slots
-    localparam AW=(ACACHE_DEPTH>1)?$clog2(ACACHE_DEPTH):1;
+    localparam AW=(ABUF_DEPTH>1)?$clog2(ABUF_DEPTH):1;
     localparam AWID=8*PE_ROWS;                       // A word width (4 bytes)
     localparam ZS=(USE_ZERO_SKIP!=0) && (USE_A_REUSE!=0);
     localparam [0:0] FLIP=(USE_DBUF!=0);             // slot pointer toggles only with 2 slots
@@ -65,23 +65,23 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     reg [RB-1:0] ar;
     reg [CB-1:0] bc;
     reg [15:0] kk_r;
-    reg fill_a;                                      // this packet writes the A cache
+    reg fill_a;                                      // this packet writes the A reuse buffer
 
-    // ---------------- A cache (on-chip RAM, 1-cycle read) ----------------
-    wire kk_fits  = (req_kk < ACACHE_DEPTH);
-    wire hit_a    = (USE_A_REUSE!=0) && req_reuse_a && kk_fits;   // A comes from cache
+    // ---------------- A reuse buffer (on-chip RAM, 1-cycle read) ----------------
+    wire kk_fits  = (req_kk < ABUF_DEPTH);
+    wire hit_a    = (USE_A_REUSE!=0) && req_reuse_a && kk_fits;   // A comes from reuse buffer
     wire accept   = req_valid && req_ready;
-    reg  aw_pend;                                    // write cache one cycle after A is complete
+    reg  aw_pend;                                    // write reuse buffer one cycle after A is complete
     reg  [15:0] aw_kk;
-    wire [AWID:0] cache_q;                           // {zero_flag, A word}
+    wire [AWID:0] abuf_q;                           // {zero_flag, A word}
     wire [AWID-1:0] aw_word = s_a[wr];
-    generate if(USE_A_REUSE!=0) begin: g_acache
-        sdp_ram #(.WIDTH(AWID+1),.DEPTH(ACACHE_DEPTH)) a_cache(
+    generate if(USE_A_REUSE!=0) begin: g_abuf
+        sdp_ram #(.WIDTH(AWID+1),.DEPTH(ABUF_DEPTH)) a_buf(
             .clk(clk),
             .we(aw_pend),.waddr(aw_kk[AW-1:0]),.wdata({(aw_word=={AWID{1'b0}}),aw_word}),
-            .re(accept && hit_a),.raddr(req_kk[AW-1:0]),.rdata(cache_q));
-    end else begin: g_no_acache
-        assign cache_q={(AWID+1){1'b0}};
+            .re(accept && hit_a),.raddr(req_kk[AW-1:0]),.rdata(abuf_q));
+    end else begin: g_no_abuf
+        assign abuf_q={(AWID+1){1'b0}};
     end endgenerate
 
     // ---------------- handshakes ----------------
@@ -115,11 +115,11 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
                     fill_a<=(USE_A_REUSE!=0) && !req_reuse_a && kk_fits;
                     s_rows[wr]<=req_rows;s_cols[wr]<=req_cols;s_first[wr]<=req_first;s_last[wr]<=req_last;
                     s_a[wr]<=0;s_b[wr]<=0;ar<=0;bc<=0;
-                    state<=hit_a?A_CRD:A_REQ;
+                    state<=hit_a?A_BRD:A_REQ;
                 end
-                A_CRD: begin                                   // cache data arrives this cycle
-                    s_a[wr]<=cache_q[AWID-1:0];
-                    if(ZS && cache_q[AWID]) begin              // all-zero A: skip B reads
+                A_BRD: begin                                   // reuse buffer data arrives this cycle
+                    s_a[wr]<=abuf_q[AWID-1:0];
+                    if(ZS && abuf_q[AWID]) begin              // all-zero A: skip B reads
                         full[wr]<=1'b1; wr<=wr^FLIP; state<=IDLE;
                     end else state<=B_REQ;
                 end

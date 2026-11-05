@@ -2,36 +2,36 @@
 // =====================================================================
 // operand_loader  --  SET 2 : all phases  (Set 3 uses this same loader unchanged;
 //                                            only gemm_control's loop order differs)
-//   Phase 1  : A reuse (A cache) + zero read skip
+//   Phase 1  : A reuse (A reuse buffer) + zero read skip
 //   Phase 2a : packet slots (NSLOTS=2 is Ping/Pong double buffering)
 //   Phase 2b : up to MAX_OUT memory requests in flight (responses must come back in order)
-//   Phase 3  : on-chip buffer = A reuse + B reuse (B buffer filled in row tile 0,
+//   Phase 3  : on-chip buffer = A reuse + B reuse (B reuse buffer filled in row tile 0,
 //              read in every later row tile)
 // Memory/Dataflow team
 //
 // Block diagram (same names as the slides):
-//   Request intake --> [slot i meta]  --(1-cycle RAM read)--> Prep (A cache / B buffer data,
+//   Request intake --> [slot i meta]  --(1-cycle RAM read)--> Prep (A reuse buffer / B reuse buffer data,
 //                                                               zero-skip decision, "need" mask)
 //   Load control   : walks slots in order, issues 1 byte request per cycle for every bit
 //                    of the slot's need mask, pushes {slot, byte index} into the tag FIFO
 //   Response router: pops the tag FIFO for every response and writes the byte into its slot;
-//                    the last A byte of a col-tile-0 packet writes the A cache,
-//                    the last B byte of a row-tile-0 packet writes the B buffer
+//                    the last A byte of a col-tile-0 packet writes the A reuse buffer,
+//                    the last B byte of a row-tile-0 packet writes the B reuse buffer
 //   Supply control : op_valid when the oldest slot has all its bytes; MAC handshake frees it
 //
 // Switches (parameters):
 //   USE_A_REUSE, USE_ZERO_SKIP, USE_B_REUSE : 0/1
 //   NSLOTS  : packet slots, power of 2 (2 = Ping/Pong, 4 recommended with MAX_OUT > 8)
 //   MAX_OUT : max requests in flight (1 = baseline-like memory use). Little's law: ~latency+1.
-//   ACACHE_DEPTH : A cache entries (one per kk);             kk >= depth  -> A read from memory
-//   BBUF_DEPTH   : B buffer entries (one per col tile x kk); addr >= depth -> B read from memory
+//   ABUF_DEPTH : A reuse buffer entries (one per kk);             kk >= depth  -> A read from memory
+//   BBUF_DEPTH   : B reuse buffer entries (one per col tile x kk); addr >= depth -> B read from memory
 //                  default 4096 x 32 bit = 16 KB = all of B for K=128, N=128
 //   All switches 0 with NSLOTS=2, MAX_OUT=1 -> same reads as the baseline.
 // =====================================================================
 module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
                         parameter USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1,
                         parameter NSLOTS=4, MAX_OUT=32,
-                        parameter ACACHE_DEPTH=1024, BBUF_DEPTH=4096)(
+                        parameter ABUF_DEPTH=1024, BBUF_DEPTH=4096)(
     input clk,rst,
     input req_valid,output req_ready,
     input [31:0] req_a_addr,req_b_addr,input [15:0] req_a_stride,
@@ -41,7 +41,7 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     input req_reuse_a,                // NEW: col tile != 0
     input req_reuse_b,                // NEW: row tile != 0
     input [31:0] req_bbuf_addr,       // NEW: col tile index * K + kk
-    input req_last_row,               // NEW: no later row tile -> don't fill the B buffer
+    input req_last_row,               // NEW: no later row tile -> don't fill the B reuse buffer
     output mem_req_valid,input mem_req_ready,
     output mem_req_is_b,output [31:0] mem_req_addr,
     input mem_rsp_valid,output mem_rsp_ready,input [7:0] mem_rsp_data,
@@ -55,7 +55,7 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     localparam SB=(NSLOTS>1)?$clog2(NSLOTS):1;
     localparam TB=(MAX_OUT>1)?$clog2(MAX_OUT):1;
     localparam AWID=8*PE_ROWS, BWID=8*PE_COLS;
-    localparam AAW=(ACACHE_DEPTH>1)?$clog2(ACACHE_DEPTH):1;
+    localparam AAW=(ABUF_DEPTH>1)?$clog2(ABUF_DEPTH):1;
     localparam BAW=(BBUF_DEPTH>1)?$clog2(BBUF_DEPTH):1;
     localparam ZS=(USE_ZERO_SKIP!=0) && (USE_A_REUSE!=0);
     localparam [SB-1:0] SLOT_LAST=NSLOTS-1;
@@ -84,8 +84,8 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
 
     // ---------------- request intake ----------------
     wire accept = req_valid && req_ready;
-    wire hit_a  = (USE_A_REUSE!=0) &&  req_reuse_a && (req_kk < ACACHE_DEPTH);
-    wire fill_a = (USE_A_REUSE!=0) && !req_reuse_a && (req_kk < ACACHE_DEPTH);
+    wire hit_a  = (USE_A_REUSE!=0) &&  req_reuse_a && (req_kk < ABUF_DEPTH);
+    wire fill_a = (USE_A_REUSE!=0) && !req_reuse_a && (req_kk < ABUF_DEPTH);
     wire hit_b  = (USE_B_REUSE!=0) &&  req_reuse_b && (req_bbuf_addr < BBUF_DEPTH);
     wire fill_b = (USE_B_REUSE!=0) && !req_reuse_b && !req_last_row && (req_bbuf_addr < BBUF_DEPTH);
     assign req_ready = !alloc[wptr] && !rst;
@@ -94,12 +94,12 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     // ---------------- on-chip RAMs ----------------
     reg aw_pend, bw_pend; reg [SB-1:0] aw_s, bw_s;
     wire [AWID:0] acq; wire [BWID-1:0] bq;
-    generate if(USE_A_REUSE!=0) begin: g_acache
+    generate if(USE_A_REUSE!=0) begin: g_abuf
         wire [AWID-1:0] w = s_a[aw_s];
-        sdp_ram #(.WIDTH(AWID+1),.DEPTH(ACACHE_DEPTH)) a_cache(.clk(clk),
+        sdp_ram #(.WIDTH(AWID+1),.DEPTH(ABUF_DEPTH)) a_buf(.clk(clk),
             .we(aw_pend),.waddr(s_kk[aw_s][AAW-1:0]),.wdata({(w=={AWID{1'b0}}),w}),
             .re(accept && hit_a),.raddr(req_kk[AAW-1:0]),.rdata(acq));
-    end else begin: g_no_acache
+    end else begin: g_no_abuf
         assign acq={(AWID+1){1'b0}};
     end endgenerate
     generate if(USE_B_REUSE!=0) begin: g_bbuf
@@ -112,7 +112,7 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
 
     // ---------------- prep (data from RAMs, zero-skip decision) ----------------
     wire zf     = cap_hita && acq[AWID];
-    wire skip_b = ZS && zf && !cap_hitb && !s_fillb[cap_s];   // never skip while filling the B buffer
+    wire skip_b = ZS && zf && !cap_hitb && !s_fillb[cap_s];   // never skip while filling the B reuse buffer
     wire [PE_ROWS-1:0] need_a = cap_hita ? {PE_ROWS{1'b0}} : s_rows[cap_s];
     wire [PE_COLS-1:0] need_b = (cap_hitb || skip_b) ? {PE_COLS{1'b0}} : s_cols[cap_s];
 

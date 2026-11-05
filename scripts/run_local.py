@@ -21,7 +21,7 @@ VARIANTS = {
     's1_areuse_zs':   ('set1_phase1_2a', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_DBUF=0)),
     's1_dbuf':        ('set1_phase1_2a', dict(USE_A_REUSE=0, USE_ZERO_SKIP=0, USE_DBUF=1)),
     's1_all':         ('set1_phase1_2a', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_DBUF=1)),
-    's1_all_acache16':('set1_phase1_2a', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_DBUF=1, ACACHE_DEPTH=16)),
+    's1_all_abuf16':('set1_phase1_2a', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_DBUF=1, ABUF_DEPTH=16)),
     # ---- Set 2 ----
     's2_off':         ('set2_all_phases', dict(USE_A_REUSE=0, USE_ZERO_SKIP=0, USE_B_REUSE=0, NSLOTS=2, MAX_OUT=1)),
     's2_p1_2a':       ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=0, NSLOTS=2, MAX_OUT=1)),
@@ -29,7 +29,7 @@ VARIANTS = {
     's2_2b_only':     ('set2_all_phases', dict(USE_A_REUSE=0, USE_ZERO_SKIP=0, USE_B_REUSE=0, NSLOTS=4, MAX_OUT=32)),
     's2_all':         ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32)),
     's2_all_small':   ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=2, MAX_OUT=4,
-                                    ACACHE_DEPTH=16, BBUF_DEPTH=64)),
+                                    ABUF_DEPTH=16, BBUF_DEPTH=64)),
     # ---- Set 3 (grouped B reuse); BBUF_DEPTH = entries of 4 bytes ----
     's3_all':         ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32)),
     's3_buf1k':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=256)),
@@ -37,7 +37,7 @@ VARIANTS = {
     's3_buf8k':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=2048)),
     's3_buf16k':      ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=4096)),
     's3_small':       ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=2, MAX_OUT=4,
-                                    ACACHE_DEPTH=16, BBUF_DEPTH=64)),
+                                    ABUF_DEPTH=16, BBUF_DEPTH=64)),
     's3_grp_test':    ('set3_grouped_b', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=8, BBUF_DEPTH=128)),
     's2_buf4k':       ('set2_all_phases', dict(USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1, NSLOTS=4, MAX_OUT=32, BBUF_DEPTH=1024)),
 }

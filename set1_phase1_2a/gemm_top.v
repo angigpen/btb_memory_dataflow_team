@@ -8,7 +8,7 @@ module gemm_top #(parameter PE_ROWS=4,PE_COLS=4,MAX_M=64,MAX_N=128,MAX_K=1024,
                   parameter USE_A_REUSE=1,      // Phase 1a
                   parameter USE_ZERO_SKIP=1,    // Phase 1b (needs USE_A_REUSE)
                   parameter USE_DBUF=1,         // Phase 2a
-                  parameter ACACHE_DEPTH=1024   // A cache entries (= max K that is cached)
+                  parameter ABUF_DEPTH=1024   // A reuse buffer entries (= max K that is buffered)
                  )(
     input clk,rst,start,
     input [15:0] cfg_m,cfg_n,cfg_k,
@@ -64,7 +64,7 @@ module gemm_top #(parameter PE_ROWS=4,PE_COLS=4,MAX_M=64,MAX_N=128,MAX_K=1024,
 
     operand_loader #(.PE_ROWS(PE_ROWS),.PE_COLS(PE_COLS),
         .USE_A_REUSE(USE_A_REUSE),.USE_ZERO_SKIP(USE_ZERO_SKIP),.USE_DBUF(USE_DBUF),
-        .ACACHE_DEPTH(ACACHE_DEPTH)) loader(
+        .ABUF_DEPTH(ABUF_DEPTH)) loader(
         .clk(clk),.rst(rst),.req_valid(dv),.req_ready(dr),
         .req_a_addr(aa),.req_b_addr(ba),.req_a_stride(astride),
         .req_rows(rm),.req_cols(cm),.req_first(first),.req_last(last),

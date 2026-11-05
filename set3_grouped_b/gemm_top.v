@@ -9,11 +9,11 @@
 module gemm_top #(parameter PE_ROWS=4,PE_COLS=4,MAX_M=64,MAX_N=128,MAX_K=1024,
                   parameter USE_A_REUSE=1,      // Phase 1a
                   parameter USE_ZERO_SKIP=1,    // Phase 1b (needs USE_A_REUSE)
-                  parameter USE_B_REUSE=1,      // Phase 3 (B buffer)
+                  parameter USE_B_REUSE=1,      // Phase 3 (B reuse buffer)
                   parameter NSLOTS=4,           // Phase 2a: packet slots (2 = Ping/Pong)
                   parameter MAX_OUT=32,         // Phase 2b: requests in flight (1 = off)
-                  parameter ACACHE_DEPTH=1024,  // A cache entries (1024 x 33 bit, about 1 BRAM36)
-                  parameter BBUF_DEPTH=1024     // B buffer entries x 4 byte: 1024 = 4 KB = 1 BRAM36 (G=8 at K=128)
+                  parameter ABUF_DEPTH=1024,  // A reuse buffer entries (1024 x 33 bit, about 1 BRAM36)
+                  parameter BBUF_DEPTH=1024     // B reuse buffer entries x 4 byte: 1024 = 4 KB = 1 BRAM36 (G=8 at K=128)
                  )(
     input clk,rst,start,
     input [15:0] cfg_m,cfg_n,cfg_k,
@@ -70,7 +70,7 @@ module gemm_top #(parameter PE_ROWS=4,PE_COLS=4,MAX_M=64,MAX_N=128,MAX_K=1024,
 
     operand_loader #(.PE_ROWS(PE_ROWS),.PE_COLS(PE_COLS),
         .USE_A_REUSE(USE_A_REUSE),.USE_ZERO_SKIP(USE_ZERO_SKIP),.USE_B_REUSE(USE_B_REUSE),
-        .NSLOTS(NSLOTS),.MAX_OUT(MAX_OUT),.ACACHE_DEPTH(ACACHE_DEPTH),.BBUF_DEPTH(BBUF_DEPTH)) loader(
+        .NSLOTS(NSLOTS),.MAX_OUT(MAX_OUT),.ABUF_DEPTH(ABUF_DEPTH),.BBUF_DEPTH(BBUF_DEPTH)) loader(
         .clk(clk),.rst(rst),.req_valid(dv),.req_ready(dr),
         .req_a_addr(aa),.req_b_addr(ba),.req_a_stride(astride),
         .req_rows(rm),.req_cols(cm),.req_first(first),.req_last(last),

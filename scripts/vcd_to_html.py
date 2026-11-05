@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CTRL_ST = {0: 'IDLE', 1: 'ISSUE', 2: 'RESULT', 3: 'WRITE'}
 S3_CTRL_ST = {**CTRL_ST, 4: 'SETUP'}
 BASE_LD_ST = {0: 'IDLE', 1: 'A_REQ', 2: 'A_RSP', 3: 'B_REQ', 4: 'B_RSP', 5: 'OFFER'}
-S1_LD_ST = {0: 'IDLE', 1: 'A_CRD', 2: 'A_REQ', 3: 'A_RSP', 4: 'B_REQ', 5: 'B_RSP'}
+S1_LD_ST = {0: 'IDLE', 1: 'A_BRD', 2: 'A_REQ', 3: 'A_RSP', 4: 'B_REQ', 5: 'B_RSP'}
 
 # (group, label, vcd path, kind[, enum map[, style]])   kind: bit | dec | hex | bin | enum
 COMMON_TOP = [
@@ -60,7 +60,7 @@ SLOT_LOADER = [
 ANIM_COMMON = ['tb_local.mem_rsp_ready', 'tb_local.out_ready', 'tb_local.dut.loader.req_valid',
                'tb_local.dut.loader.req_ready', 'tb_local.dut.loader.op_valid', 'tb_local.dut.loader.op_ready',
                'tb_local.dut.control.state', 'tb_local.dut.control.row', 'tb_local.dut.control.col',
-               'tb_local.dut.control.kk', 'tb_local.dut.loader.state']
+               'tb_local.dut.control.kk', 'tb_local.dut.loader.state', 'tb_local.out_addr']
 ANIM = {
     'baseline': ANIM_COMMON,
     's1_all': ANIM_COMMON + ['tb_local.dut.loader.full', 'tb_local.dut.loader.wr', 'tb_local.dut.loader.rd',
@@ -90,7 +90,7 @@ SETS = {
     ] + OUT),
     's2_all': dict(name='Set 2', title='Set 2 — all phases (slots, requests in flight, A+B reuse)',
                    signals=COMMON_TOP + ctrl(reuse_a=True, reuse_b=True) + MEM + SLOT_LOADER + OUT),
-    's3_all': dict(name='Set 3', title='Set 3 — Set 2 + grouped B reuse (G column tiles per group, 4 KB B buffer)',
+    's3_all': dict(name='Set 3', title='Set 3 — Set 2 + grouped B reuse (G column tiles per group, 4 KB B reuse buffer)',
                    signals=COMMON_TOP + ctrl(S3_CTRL_ST, reuse_a=True, reuse_b=True, extra=[
         ('gemm_control', 'grp_start', 'tb_local.dut.control.grp_start', 'dec'),
         ('gemm_control', 'gw (group width)', 'tb_local.dut.control.gw', 'dec'),
@@ -132,9 +132,9 @@ def memory(v, over=None):
         it.append(dict(key='pkt', name='Packet data (Ping/Pong slots)', shape=f'{ns} × {pkt} b', bits=ns * pkt, bram=0, kind='FF',
                        src='s_a, s_b, s_rows, s_cols, s_first, s_last'))
         if P.get('USE_A_REUSE', 1):
-            d = P['ACACHE_DEPTH']
-            it.append(dict(key='acache', name='A cache (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
-                           bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_cache'))
+            d = P['ABUF_DEPTH']
+            it.append(dict(key='abuf', name='A reuse buffer (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
+                           bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_buf'))
         return it
     ni = R + C; iw = math.ceil(math.log2(ni)); ns = P['NSLOTS']; mo = P['MAX_OUT']
     sb = max(1, math.ceil(math.log2(ns)))
@@ -146,12 +146,12 @@ def memory(v, over=None):
     it.append(dict(key='tag', name='Tag FIFO (requests in flight)', shape=f'{mo} × {sb + iw} b', bits=mo * (sb + iw), bram=0,
                    kind='FF/LUTRAM', src='tag_s, tag_i'))
     if P.get('USE_A_REUSE', 1):
-        d = P['ACACHE_DEPTH']
-        it.append(dict(key='acache', name='A cache (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
-                       bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_cache'))
+        d = P['ABUF_DEPTH']
+        it.append(dict(key='abuf', name='A reuse buffer (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
+                       bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_buf'))
     if P.get('USE_B_REUSE', 1):
         d = P['BBUF_DEPTH']
-        it.append(dict(key='bbuf', name='B buffer', shape=f'{d} × {8 * C} b', bits=d * 8 * C, bram=bram36(d, 8 * C), kind='BRAM',
+        it.append(dict(key='bbuf', name='B reuse buffer', shape=f'{d} × {8 * C} b', bits=d * 8 * C, bram=bram36(d, 8 * C), kind='BRAM',
                        src='sdp_ram b_buf'))
     if v == 's3_all':
         it.append(dict(key='grp', name='Group registers (gemm_control)', shape='4 × 16 b + 32 b + 1 state bit', bits=4 * 16 + 32 + 1,
@@ -269,7 +269,7 @@ def main():
     for (v, c), r in metrics.items():
         if v in SETS:
             payload['metrics'][f'{v}|{c}'] = {k: r[k] for k in KEYS}
-    # B-buffer size sweep at 64x128x128 (results/set3_results.csv)
+    # B reuse buffer size sweep at 64x128x128 (results/set3_results.csv)
     BUF = [('baseline', 'Baseline', '—'), ('s1_all', 'Set 1', '—'), ('s2_buf4k', 'Set 2', '4 KB'),
            ('s3_buf1k', 'Set 3', '1 KB (G=2)'), ('s3_buf2k', 'Set 3', '2 KB (G=4)'), ('s3_all', 'Set 3 (default)', '4 KB (G=8)'),
            ('s3_buf8k', 'Set 3', '8 KB (G=16)'), ('s2_all', 'Set 2 (default)', '16 KB (all of B)'),
@@ -322,8 +322,10 @@ table{border-collapse:collapse;margin:0 24px 30px;background:var(--panel);border
 th,td{padding:6px 14px;border-bottom:1px solid var(--line);text-align:right}th{font-size:12px;color:var(--mute);font-weight:600}
 td:first-child,th:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
 h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute);font-size:13px;max-width:980px}.best{font-weight:700}
-.dg{margin:0 24px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.dg .vtitle{padding:8px 14px}.dg svg{display:block;width:100%;height:auto}
+#diagrams{display:grid;grid-template-columns:repeat(var(--dgcols,2),minmax(0,1fr));gap:12px;margin:0 24px 14px;align-items:start}
+.dg{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.dg .vtitle{padding:8px 14px;flex-wrap:wrap;font-size:calc(14px - var(--dgcols,2) * 0.5px)}.dg svg{display:block;width:100%;height:auto}
+.dg canvas.mx{display:block;width:100%;height:auto;border-top:1px solid var(--line)}
 .dg p{margin:0;padding:0 14px 10px;color:var(--mute);font-size:12.5px}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 24px 10px;font-size:12px;color:var(--mute)}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:5px}
@@ -343,7 +345,7 @@ svg .mono{font-family:ui-monospace,Menlo,monospace}.tag{display:inline-block;fon
 <h2>Additional on-chip memory (default parameters, from the RTL declarations)</h2>
 <table id="memSum"></table>
 <table id="memItems"></table>
-<p class="note">Counted: data storage on the operand path — packet registers/slots, request tracking, tag FIFO, A cache, B buffer (bit widths
+<p class="note">Counted: data storage on the operand path — packet registers/slots, request tracking, tag FIFO, A reuse buffer, B reuse buffer (bit widths
 taken from the <code>reg</code>/<code>sdp_ram</code> declarations and each set's <code>gemm_top.v</code> defaults; PE 4×4).
 Not counted: FSM/address/counter registers that baseline also has. BRAM36 = Xilinx block RAM count by aspect ratio
 (1K×36, 4K×9, …; BRAM18 = 0.5); Vivado may map small RAMs to LUTRAM instead. Yosys estimate in the README: Set 1 ≈ 1 BRAM36 / +100 FF, Set 2 ≈ 5 BRAM36 / +300 FF.</p>
@@ -356,13 +358,14 @@ Not counted: FSM/address/counter registers that baseline also has. BRAM36 = Xili
  <input type="range" id="scrub" min="0" max="100" value="0" step="1" style="flex:1;min-width:200px">
  <span id="cycLbl" style="font-variant-numeric:tabular-nums;min-width:90px">cycle 0</span>
  <label style="color:var(--mute);font-size:13px"><input type="checkbox" id="follow" checked> move waveform cursor</label>
+ <span style="color:var(--mute);font-size:13px">size</span><div class="seg" id="dgSize"></div>
 </div>
 <div class="legend" id="legend"></div>
 <div id="diagrams"></div>
 <h2>Waveforms</h2>
 <div id="views"></div>
-<h2>Set 3 B-buffer sweep — 64×128×128 (from <code>results/set3_results.csv</code>)</h2>
-<p class="note">Where Set 3 matters: B for 64×128×128 is 16 KB. With the same 4 KB buffer, Set 2 can only reuse the column tiles that fit;
+<h2>Set 3 B reuse buffer sweep — 64×128×128 (from <code>results/set3_results.csv</code>)</h2>
+<p class="note">Where Set 3 matters: B for 64×128×128 is 16 KB. With the same 4 KB reuse buffer, Set 2 can only reuse the column tiles that fit;
 Set 3 reorders the loop (group → row tile → col tile in group → kk) so the buffer is refilled per group and every byte of B is read once.</p>
 <table id="buf"></table>
 <h2>All cases (local Icarus runs, pipelined memory)</h2>
@@ -502,7 +505,7 @@ function stats(){
  if(w3){const st=w3.data['tb_local.dut.control.state'];const i=st.findIndex(e=>e[1]===4);if(i>=0&&i+1<st.length)setup=st[i+1][0]-st[i][0]}
  const diff=m&&m2?(+m.cycles)-(+m2.cycles):null;
  document.getElementById('note').textContent=m&&+m.m>4?
-  `What to watch: ${+m.m/4} row tiles × ${+m.n/4} col tiles × K=${m.k}. Set 2 fills its 16 KB B buffer during row tile 0 and reads it for every later row tile. Set 3 fills its 4 KB buffer during row tile 0 of each group of G=${Math.max(1,Math.min(+m.n/4,Math.floor((P.sets.s3_all.params.BBUF_DEPTH||1024)/+m.k)))} col tiles (the group range in gemm_control), then reuses it for the other row tiles. Baseline and Set 1 are far slower, so only their first cycles are recorded.`:
+  `What to watch: ${+m.m/4} row tiles × ${+m.n/4} col tiles × K=${m.k}. Set 2 fills its 16 KB B reuse buffer during row tile 0 and reads it for every later row tile. Set 3 fills its 4 KB reuse buffer during row tile 0 of each group of G=${Math.max(1,Math.min(+m.n/4,Math.floor((P.sets.s3_all.params.BBUF_DEPTH||1024)/+m.k)))} col tiles (the group range in gemm_control), then reuses it for the other row tiles. Baseline and Set 1 are far slower, so only their first cycles are recorded.`:
   m&&+m.m<=4?
   `Note: M=${m.m} fits in one row tile, so Set 3 has nothing to group (B is never reused across row tiles) and runs the same loop as Set 2. `+
   (diff>0?`The ${diff} extra cycle${diff>1?'s':''} (${m.cycles} vs ${m2.cycles}) come from Set 3's start-up SETUP state that picks G${setup?` (${setup} cycles in the waveform)`:''}. `:
@@ -537,7 +540,7 @@ function table(){
    <td>${b?(b.cycles/m.cycles).toFixed(2)+'×':''}</td><td>${(+m.a_reads).toLocaleString()}</td><td>${(+m.b_reads).toLocaleString()}</td><td>${m.max_outstanding}</td></tr>`}
  document.getElementById('tbl').innerHTML=h;
  const B=P.buffers,b0=B.find(x=>x.v==='baseline');memTables();const num=x=>x==null?'—':(+x).toLocaleString();
- let g='<tr><th>variant</th><th>B buffer</th><th>on-chip storage</th><th>BRAM36</th><th>cycles (lat 1)</th><th>speedup</th><th>cycles (lat 23)</th><th>speedup</th><th>total reads</th><th>read change</th></tr>';
+ let g='<tr><th>variant</th><th>B reuse buffer</th><th>on-chip storage</th><th>BRAM36</th><th>cycles (lat 1)</th><th>speedup</th><th>cycles (lat 23)</th><th>speedup</th><th>total reads</th><th>read change</th></tr>';
  for(const r of B){g+=`<tr class="${r.v==='s3_all'?'best':''}"><td>${r.name}</td><td>${r.buf}</td><td>${kb(r.mem_bits)}</td><td>${r.bram}</td><td>${num(r.c1)}</td><td>${b0&&r.c1?(b0.c1/r.c1).toFixed(1)+'×':''}</td>
   <td>${num(r.c23)}</td><td>${b0&&r.c23?(b0.c23/r.c23).toFixed(1)+'×':''}</td><td>${num(r.reads)}</td><td>${b0&&r.v!=='baseline'?((r.reads/b0.reads-1)*100).toFixed(1)+'%':'—'}</td></tr>`}
  document.getElementById('buf').innerHTML=g;
@@ -550,9 +553,9 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',render);
 const NS='http://www.w3.org/2000/svg';
 const DESC={
  baseline:'One request at a time: fetch 4 A bytes, then 4 B bytes, one memory round-trip each, then hand the packet to the MAC. No reuse, no overlap.',
- s1_all:'A cache keeps each kk\'s A word from col tile 0 and replays it for later col tiles (blue flash = cache read, orange = fill). All-zero A skips the B reads. Ping/Pong slots let the next packet load while the MAC holds the other — but still one memory request at a time.',
- s2_all:'4 slots and a 32-entry tag FIFO keep up to 32 requests in flight (dots in the memory pipe). The A cache and the 16 KB B buffer (filled during row tile 0) remove most reads.',
- s3_all:'Same loader as Set 2, but gemm_control walks group → row tile → col tile in group → kk, so a 4 KB B buffer holds G column tiles and is reused by every row tile of the group. SETUP picks G at start.'};
+ s1_all:'A reuse buffer keeps each kk\'s A word from col tile 0 and replays it for later col tiles (blue flash = buffer read, orange = fill). All-zero A skips the B reads. Ping/Pong slots let the next packet load while the MAC holds the other — but still one memory request at a time.',
+ s2_all:'4 slots and a 32-entry tag FIFO keep up to 32 requests in flight (dots in the memory pipe). The A reuse buffer and the 16 KB B reuse buffer (filled during row tile 0) remove most reads.',
+ s3_all:'Same loader as Set 2, but gemm_control walks group → row tile → col tile in group → kk, so a 4 KB B reuse buffer holds G column tiles and is reused by every row tile of the group. SETUP picks G at start.'};
 const COL={A:'#2563eb',B:'#ea580c',req:'#7c3aed',op:'#16a34a',out:'#0891b2',skip:'#9ca3af'};
 document.getElementById('legend').innerHTML=[['A request / A data',COL.A],['B request / B data',COL.B],['request from gemm_control',COL.req],['packet to MAC',COL.op],['result written',COL.out],['zero-skipped B',COL.skip]]
  .map(([l,c])=>`<span><i style="background:${c}"></i>${l}</span>`).join('');
@@ -570,13 +573,16 @@ function prepAnim(set){
  ev.cst=d(Cp+'state');ev.row=d(Cp+'row');ev.col=d(Cp+'col');ev.kk=d(Cp+'kk');ev.lst=d(L+'state');ev.done=d('tb_local.done');
  ev.aRd=new Int32Array(n);ev.bRd=new Int32Array(n);ev.aWr=new Int32Array(n);ev.bWr=new Int32Array(n);ev.skip=new Int32Array(n);
  if(set==='s1_all'){ev.full=d(L+'full');ev.wr=d(L+'wr');ev.rd=d(L+'rd');ev.aRd=and(d(L+'accept'),d(L+'hit_a'));ev.aWr=d(L+'aw_pend');
-  for(let c=0;c+1<n;c++)if(ev.lst[c]===1&&ev.lst[c+1]!==4)ev.skip[c]=1}         // A_CRD not followed by B_REQ = zero skip
+  for(let c=0;c+1<n;c++)if(ev.lst[c]===1&&ev.lst[c+1]!==4)ev.skip[c]=1}         // A_BRD not followed by B_REQ = zero skip
  if(set==='s2_all'||set==='s3_all'){ev.alloc=d(L+'alloc');ev.prep=d(L+'prep');ev.rd=d(L+'rd');ev.oc=d(L+'out_cnt');
   const cv=d(L+'cap_v');ev.aRd=and(cv,d(L+'cap_hita'));ev.bRd=and(cv,d(L+'cap_hitb'));ev.skip=and(cv,d(L+'skip_b'));
   ev.aWr=d(L+'aw_pend');ev.bWr=d(L+'bw_pend')}
  if(set==='s3_all'){ev.gs=d(Cp+'grp_start');ev.gw=d(Cp+'gw')}
  // pair requests with (in-order) responses
  const q=[],reqs=[];for(let c=0;c<n;c++){if(ev.memRsp[c]&&q.length){q.shift().r=c}if(ev.memReq[c]){const o={q:c,b:ev.isB[c],r:null};q.push(o);reqs.push(o)}}
+ const ad=d('tb_local.mem_req_addr'),oa=d('tb_local.out_addr');reqs.forEach(o=>o.a=ad[o.q]);
+ ev.outs=[];for(let c=0;c<n;c++)if(ev.out[c])ev.outs.push([c,oa[c]]);
+ ev.maxLife=reqs.reduce((m,o)=>Math.max(m,(o.r??n)-o.q),0);
  ev.reqs=reqs;ev.byRsp=new Map(reqs.filter(o=>o.r!=null).map(o=>[o.r,o]));ev.trunc=!!w.trunc;const cum=a=>{const o=new Int32Array(n);let s=0;for(let c=0;c<n;c++){s+=a[c];o[c]=s}return o};
  ev.cA=cum(ev.memReq.map((x,i)=>x&&!ev.isB[i]?1:0));ev.cB=cum(ev.memReq.map((x,i)=>x&&ev.isB[i]?1:0));
  ev.cOp=cum(ev.op);ev.cOut=cum(ev.out);ev.cARd=cum(ev.aRd);ev.cBRd=cum(ev.bRd);ev.cSkip=cum(ev.skip);
@@ -608,11 +614,11 @@ function buildDiagram(set){
   const t2=mk('text',{x:x+41,y:98,'font-size':10.5,'text-anchor':'middle',fill:'var(--mute)'},svg,'empty');
   const mark=mk('text',{x:x+76,y:70,'font-size':10,'text-anchor':'end',fill:'var(--mute)'},svg,'');E.slots.push({r,t2,mark})}
  if(set!=='baseline'){E.ac=mk('rect',{x:235,y:128,width:180,height:62,rx:6,fill:'var(--grp)',stroke:'var(--line)','stroke-width':1.5},svg);
-  mk('text',{x:245,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'A cache');
-  mk('text',{x:405,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.ACACHE_DEPTH}×33 b`);
+  mk('text',{x:245,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'A reuse buffer');
+  mk('text',{x:405,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.ABUF_DEPTH}×33 b`);
   E.acT=mk('text',{x:245,y:176,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'')}
  if(set==='s2_all'||set==='s3_all'){E.bb=mk('rect',{x:425,y:128,width:180,height:62,rx:6,fill:'var(--grp)',stroke:'var(--line)','stroke-width':1.5},svg);
-  mk('text',{x:435,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'B buffer');
+  mk('text',{x:435,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'B reuse buffer');
   mk('text',{x:595,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.BBUF_DEPTH*4/1024} KB`);
   E.bbT=mk('text',{x:435,y:176,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'')}
  if(set==='s2_all'||set==='s3_all'){const mo=pr.MAX_OUT||32;mk('text',{x:235,y:215,'font-size':11,fill:'var(--mute)'},svg,`tag FIFO — requests in flight (max ${mo})`);
@@ -638,10 +644,76 @@ function buildDiagram(set){
  E.aRsp=arrow(svg,'M660,115 L622,115','rsp',641,130);
  E.aOp=arrow(svg,'M620,250 L658,250','packet',639,240);
  E.aOut=arrow(svg,'M810,250 L833,250','',0,0);
- D.wrap=wrap;D.lat=lat;return D}
+ D.wrap=wrap;D.lat=lat;
+ if(m.m){D.mx={M:+m.m,N:+m.n,K:+m.k,cv:document.createElement('canvas'),upto:-1};D.mx.cv.className='mx';wrap.appendChild(D.mx.cv);mxInit(D)}
+ return D}
+function rgb(h){h=h.trim();if(h.startsWith('#')){const x=h.length===4?h.slice(1).split('').map(c=>c+c).join(''):h.slice(1);return[0,2,4].map(i=>parseInt(x.substr(i,2),16))}return[200,200,200]}
+function mxInit(D){const X=D.mx,{M,N,K}=X;
+ X.cntA=new Uint16Array(M*K);X.cntB=new Uint16Array(K*N);X.ri=0;
+ X.wc=new Float64Array(M*N).fill(Infinity);for(const [c,a] of D.ev.outs)if(a<M*N)X.wc[a]=Math.min(X.wc[a],c);
+ const off=(w,h)=>{const o=document.createElement('canvas');o.width=w;o.height=h;return o};
+ X.oA=off(K,M);X.oB=off(N,K);X.oC=off(N,M);
+ // layout in CSS px: A | × | B | = | C   (rows of A/C = M, rows of B = K)
+ const W=1000,H=320;const gap=46,top=34,bot=26;
+ X.s=Math.min(28,(W-40-2*gap)/(K+2*N),(H-top-bot)/Math.max(M,K));
+ const s=X.s,used=s*(K+2*N)+2*gap;let x=(W-used)/2;
+ X.A={x,y:top,w:K*s,h:M*s};x+=K*s+gap;X.B={x,y:top,w:N*s,h:K*s};x+=N*s+gap;X.C={x,y:top,w:N*s,h:M*s};
+ X.W=W;X.H=top+Math.max(M,K)*s+bot}
+function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=P.sets[D.set].params;
+ // fetch counts up to cycle c (incremental forward, rebuild on rewind)
+ if(c<X.upto){X.cntA.fill(0);X.cntB.fill(0);X.ri=0}
+ const R=ev.reqs;while(X.ri<R.length&&R[X.ri].q<=c){const o=R[X.ri++];if(o.b){if(o.a<K*N)X.cntB[o.a]++}else if(o.a<M*K)X.cntA[o.a]++}X.upto=c;
+ const cv=X.cv,dpr=devicePixelRatio||1,cw=cv.clientWidth||1000,sc=cw/X.W;
+ cv.style.height=(X.H*sc)+'px';if(cv.width!==Math.round(cw*dpr)){cv.width=Math.round(cw*dpr);cv.height=Math.round(X.H*sc*dpr)}
+ const g=cv.getContext('2d');g.setTransform(dpr*sc,0,0,dpr*sc,0,0);g.clearRect(0,0,X.W,X.H);g.imageSmoothingEnabled=false;
+ const bg=rgb(css('--grid')),ink=css('--ink'),mute=css('--mute');
+ // per-pixel loop without allocations; colour = bg blended toward col by alpha a(i)
+ const paintImg=(o,w,h,col,src,amap)=>{if(!o._im)o._im=o.getContext('2d').createImageData(w,h);const d=o._im.data,n=w*h;
+  const lut=[];for(let a=0;a<amap.length;a++)lut.push([bg[0]+(col[0]-bg[0])*amap[a],bg[1]+(col[1]-bg[1])*amap[a],bg[2]+(col[2]-bg[2])*amap[a]]);
+  for(let i=0;i<n;i++){const L=lut[src(i)],j=4*i;d[j]=L[0];d[j+1]=L[1];d[j+2]=L[2];d[j+3]=255}o.getContext('2d').putImageData(o._im,0,0)};
+ const AL=[0];for(let k=1;k<64;k++)AL.push(Math.min(.92,.3+.16*Math.log2(k)));
+ const cA=X.cntA,cB=X.cntB,wc=X.wc;
+ paintImg(X.oA,K,M,[37,99,235],i=>cA[i]<63?cA[i]:63,AL);paintImg(X.oB,N,K,[234,88,12],i=>cB[i]<63?cB[i]:63,AL);
+ paintImg(X.oC,N,M,[22,163,74],i=>wc[i]<=c?1:0,[0,.75]);
+ for(const [o,r] of [[X.oA,X.A],[X.oB,X.B],[X.oC,X.C]])g.drawImage(o,r.x,r.y,r.w,r.h);
+ const s=X.s;
+ if(s>=6){g.strokeStyle=css('--panel');g.lineWidth=1;for(const [r,cols,rows] of [[X.A,K,M],[X.B,N,K],[X.C,N,M]]){g.beginPath();
+  for(let i=1;i<cols;i++){g.moveTo(r.x+i*s,r.y);g.lineTo(r.x+i*s,r.y+r.h)}for(let j=1;j<rows;j++){g.moveTo(r.x,r.y+j*s);g.lineTo(r.x+r.w,r.y+j*s)}g.stroke()}}
+ for(const r of [X.A,X.B,X.C]){g.strokeStyle=css('--line');g.lineWidth=1;g.strokeRect(r.x,r.y,r.w,r.h)}
+ // labels
+ g.font='600 12px -apple-system,sans-serif';g.fillStyle=ink;g.textBaseline='alphabetic';
+ g.fillText(`A  (${M}×${K})`,X.A.x,X.A.y-8);g.fillText(`B  (${K}×${N})`,X.B.x,X.B.y-8);g.fillText(`C  (${M}×${N})`,X.C.x,X.C.y-8);
+ g.font='20px -apple-system,sans-serif';g.fillStyle=mute;const my=X.A.y+Math.min(X.A.h,X.B.h)/2+7;
+ g.fillText('×',X.A.x+X.A.w+16,my);g.fillText('=',X.B.x+X.B.w+16,my);
+ // A reuse buffer / B reuse buffer regions (dashed)
+ const row=ev.row[c],col=ev.col[c],kk=ev.kk[c];g.setLineDash([4,3]);g.lineWidth=1.5;
+ if(D.set!=='baseline'){const dep=Math.min(K,pr.ABUF_DEPTH||1024);g.strokeStyle=COL.A;g.strokeRect(X.A.x-1.5,X.A.y+row*s-1.5,dep*s+3,Math.min(4,M-row)*s+3)}
+ if(D.set==='s2_all'||D.set==='s3_all'){const dep=pr.BBUF_DEPTH||4096;g.strokeStyle=COL.B;
+  let c0=0,c1=N;if(D.set==='s3_all'&&ev.gw&&ev.gw[c]){c0=ev.gs[c];c1=Math.min(N,c0+ev.gw[c])}
+  const full=Math.floor(dep/K),tiles=Math.ceil((c1-c0)/4);const ft=Math.min(tiles,full);
+  if(ft>0)g.strokeRect(X.B.x+c0*s-1.5,X.B.y-1.5,Math.min(ft*4,c1-c0)*s+3,K*s+3);
+  if(ft<tiles&&dep%K){g.strokeRect(X.B.x+(c0+ft*4)*s-1.5,X.B.y-1.5,Math.min(4,c1-c0-ft*4)*s+3,(dep%K)*s+3)}}
+ g.setLineDash([]);
+ // current position (what gemm_control is issuing)
+ const busy=ev.cst[c]!==0;
+ if(busy){const rr=Math.min(4,M-row),cc=Math.min(4,N-col);g.strokeStyle=ink;g.lineWidth=2;
+  g.strokeRect(X.A.x+kk*s,X.A.y+row*s,Math.max(s,2),rr*s);g.strokeRect(X.B.x+col*s,X.B.y+kk*s,cc*s,Math.max(s,2));
+  g.strokeRect(X.C.x+col*s,X.C.y+row*s,cc*s,rr*s);g.globalAlpha=.25;g.fillStyle=ink;
+  g.fillRect(X.A.x,X.A.y+row*s,K*s,rr*s);g.fillRect(X.B.x+col*s,X.B.y,cc*s,K*s);g.globalAlpha=1}
+ // requests in flight: exact elements
+ for(const o of inFlight(ev,c)){
+  const r=o.b?X.B:X.A,w=o.b?N:K,ri=Math.floor(o.a/w),ci=o.a%w,z=Math.max(s,3);
+  g.fillStyle=o.b?COL.B:COL.A;g.fillRect(r.x+ci*s-(z-s)/2,r.y+ri*s-(z-s)/2,z,z)}
+ // caption
+ g.font='11px -apple-system,sans-serif';g.fillStyle=mute;const yb=X.H-8;
+ g.fillText(busy?`issuing: A rows ${row}–${row+Math.min(4,M-row)-1}, k=${kk}  ×  B k=${kk}, cols ${col}–${col+Math.min(4,N-col)-1}  →  C tile (${row}, ${col})`:'idle',X.A.x,yb);
+ let lx=X.C.x+X.C.w;g.textAlign='right';
+ g.fillText(`shade = times fetched from memory · dashed = ${D.set==='baseline'?'—':D.set==='s1_all'?'A reuse buffer':'A reuse buffer / B reuse buffer'} · green = C written (${ev.cOut[c]}/${M*N})`,lx,yb);g.textAlign='left'}
 function tok(a,on,p,col){if(!on){a.t.setAttribute('opacity',0);sa(a.p,'stroke','var(--line)');return}
  if(a.len==null)a.len=a.p.getTotalLength();const pt=a.p.getPointAtLength(a.len*Math.min(1,p));a.t.setAttribute('cx',pt.x);a.t.setAttribute('cy',pt.y);
  sa(a.t,'fill',col);a.t.setAttribute('opacity',1);sa(a.p,'stroke',col)}
+function reqFrom(ev,cmin){const R=ev.reqs;let lo=0,hi=R.length;while(lo<hi){const m=(lo+hi)>>1;if(R[m].q<cmin)lo=m+1;else hi=m}return lo}
+function inFlight(ev,t){const out=[],R=ev.reqs;for(let i=reqFrom(ev,t-ev.maxLife-1);i<R.length&&R[i].q<=t;i++){const o=R[i];if(o.r===null||o.r>t)out.push(o)}return out}
 function anyIn(arr,c0,c1){for(let c=Math.max(0,c0);c<=c1&&c<arr.length;c++)if(arr[c])return c;return -1}
 function update(D,t,prevT){
  const ev=D.ev,E=D.el,n=ev.n;const c=Math.min(Math.floor(t),n-1),p=t-Math.floor(t);
@@ -657,7 +729,7 @@ function update(D,t,prevT){
  k=f(ev.memRsp);let rb=null;if(k>=0){const r=ev.byRsp.get(k);rb=r?r.b:0}tok(E.aRsp,k>=0,k===c?p:1,rb?COL.B:COL.A);
  k=f(ev.op);tok(E.aOp,k>=0,k===c?p:1,COL.op);k=f(ev.out);tok(E.aOut,k>=0,k===c?p:1,COL.out);
  // memory pipe
- const inf=ev.reqs.filter(o=>o.q<=t&&(o.r===null||o.r>t));while(E.memG.firstChild)E.memG.firstChild.remove();
+ const inf=inFlight(ev,t);while(E.memG.firstChild)E.memG.firstChild.remove();
  inf.forEach((o,i)=>{const span=Math.max(1,(o.r??(o.q+D.lat))-o.q);const fr=Math.min(1,(t-o.q)/span);
   mk('circle',{cx:690+fr*265,cy:72+(i%3)*13,r:5,fill:o.b?COL.B:COL.A},E.memG)});
  E.memT.textContent=`in flight ${inf.length}   reads A ${ev.cA[c]}  B ${ev.cB[c]}`;
@@ -665,13 +737,13 @@ function update(D,t,prevT){
  const S=E.slots;S.forEach((s,i)=>{let state='empty',fill='var(--grp)',mark='';
   if(D.set==='baseline'){const l=ev.lst[c];if(l===5){state='ready';fill=COL.op}else if(l>=1){state=l<=2?'loading A':'loading B';fill=l<=2?COL.A:COL.B}}
   else if(D.set==='s1_all'){const full=(ev.full[c]>>i)&1,l=ev.lst[c];
-   if(full){state='ready';fill=COL.op}else if(ev.wr[c]===i&&l!==0){state=l===1?'A from cache':l<=3?'loading A':'loading B';fill=l<=3?COL.A:COL.B}
+   if(full){state='ready';fill=COL.op}else if(ev.wr[c]===i&&l!==0){state=l===1?'A from buffer':l<=3?'loading A':'loading B';fill=l<=3?COL.A:COL.B}
    mark=(ev.wr[c]===i?'wr ':'')+(ev.rd[c]===i?'rd':'')}
   else{const al=(ev.alloc[c]>>i)&1,pp=(ev.prep[c]>>i)&1;
    if(al){if(ev.rd[c]===i&&ev.op[c]){state='to MAC';fill=COL.op}else if(!pp){state='prep';fill='var(--busF)'}else{state='loading';fill='var(--hiF)'}}
    mark=ev.rd[c]===i?'rd':''}
   sa(s.r,'fill',fill);s.r.setAttribute('fill-opacity',fill.startsWith('#')?.35:1);s.t2.textContent=state;s.mark.textContent=mark});
- // caches
+ // reuse buffers
  const fl=(el,rd,wr)=>{if(!el)return;sa(el,'stroke',rd?COL.A:wr?COL.B:'var(--line)');el.setAttribute('stroke-width',rd||wr?4:1.5)};
  const aR=anyIn(ev.aRd,c0,c)>=0,aW=anyIn(ev.aWr,c0,c)>=0,bR=anyIn(ev.bRd,c0,c)>=0,bW=anyIn(ev.bWr,c0,c)>=0;
  fl(E.ac,aR,aW);fl(E.bb,bR,bW);
@@ -689,6 +761,7 @@ function update(D,t,prevT){
   ev.trunc&&c>=ev.end?`still running — ${pct} done at cycle ${c.toLocaleString()} (finishes at ${M?(+M.cycles).toLocaleString():'?'}; waveform window ends here)`:
   `cycle ${c.toLocaleString()} · ${pct}`;
  if(ev.trunc&&c>=ev.end)E.doneT.textContent=`${pct.split(' ')[0]} done`;
+ mxDraw(D,t,c);
 }
 function buildDiagrams(){
  const box=document.getElementById('diagrams');box.innerHTML='';for(const k in dgs)delete dgs[k];
@@ -708,7 +781,15 @@ document.getElementById('play').onclick=()=>{playing=!playing;const b=document.g
 document.getElementById('scrub').oninput=e=>{const prev=T;T=+e.target.value;paint(T,T-.001)};
 document.getElementById('stepF').onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';const prev=T;T=Math.floor(T)+1;paint(T+.5,T-.5);T+=.5};
 document.getElementById('stepB').onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';T=Math.max(0,Math.floor(T)-1);paint(T+.5,T-.5);T+=.5};
-const _render=render;render=function(){_render();T=0;buildDiagrams()};
+const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+let dgCols=+(store.get('dgCols')||2);
+function setCols(k){dgCols=k;store.set('dgCols',k);document.getElementById('diagrams').style.setProperty('--dgcols',Math.max(1,Math.min(k,Object.keys(dgs).length)));
+ document.getElementById('dgSize').querySelectorAll('button').forEach(b=>b.className=+b.dataset.k===k?'on':'');
+ requestAnimationFrame(()=>paint(T,T-.001))}
+(()=>{const el=document.getElementById('dgSize');for(const [k,l] of [[1,'Large'],[2,'Medium'],[3,'Small'],[4,'Tiny']]){
+ const b=document.createElement('button');b.textContent=l;b.dataset.k=k;b.title=k+' per row';b.onclick=()=>setCols(k);el.appendChild(b)}})();
+window.addEventListener('resize',()=>paint(T,T-.001));
+const _render=render;render=function(){_render();T=0;buildDiagrams();setCols(dgCols)};
 table();render();
 </script></body></html>
 '''
