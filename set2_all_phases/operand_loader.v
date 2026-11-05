@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 // =====================================================================
-// operand_loader  --  SET 2 : all phases
+// operand_loader  --  SET 2 : all phases  (Set 3 uses this same loader unchanged;
+//                                            only gemm_control's loop order differs)
 //   Phase 1  : A reuse (A cache) + zero read skip
 //   Phase 2a : packet slots (NSLOTS=2 is Ping/Pong double buffering)
 //   Phase 2b : up to MAX_OUT memory requests in flight (responses must come back in order)
