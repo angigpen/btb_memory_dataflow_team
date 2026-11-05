@@ -104,6 +104,11 @@ module tb_local;
         $dumpvars(1, dut.loader);
         $dumpvars(1, dut.control);
     end
+    // +VCDCYC=n: stop dumping after cycle n (the run itself still completes and is checked)
+    integer vcdcyc;
+    initial if($value$plusargs("VCD=%s",vcdfile) && $value$plusargs("VCDCYC=%d",vcdcyc)) begin
+        wait(cyc>=vcdcyc); $dumpoff;
+    end
 
     initial begin
         if(!$value$plusargs("CASEDIR=%s",dir)) begin $display("need +CASEDIR"); $finish; end

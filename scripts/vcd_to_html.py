@@ -2,6 +2,9 @@
 
     python scripts/run_local.py --variants baseline,s1_all,s2_all,s3_all --cases rectangular,sparse_90,long_latency --vcd
     python scripts/run_local.py --extended --variants baseline,s1_all,s2_all --out out_full   # table rows
+    # realistic case: Set 2/3 dumped in full, baseline/Set 1 only for their first 160k cycles (else several GB)
+    python scripts/run_local.py --variants s2_all,s3_all --cases bench_64x128x128_l23 --vcd --out out_big
+    python scripts/run_local.py --variants baseline,s1_all --cases bench_64x128x128_l23 --vcd --vcd-cycles 160000 --out out_big
     python scripts/vcd_to_html.py                    # -> out/waves.html
     python scripts/vcd_to_html.py --cases rectangular,long_latency --out out/waves.html
 
@@ -219,13 +222,21 @@ def trim(data, ncyc):
         before = [v for c, v in ch if c <= start]
         seq = [[0, before[-1] if before else None]] + [[c - start, v] for c, v in ch if start < c < end]
         res[p] = seq
-    return res, end - start, start
+    return res, end - start, start, not d1
+
+
+def encode(seq):
+    """[[c, v], ...] -> flat delta list [c0, v0, c1-c0, v1, ...] (about half the JSON size)."""
+    out, prev = [], 0
+    for c, v in seq:
+        out += [c - prev, v]; prev = c
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--cases', default='rectangular,sparse_90,long_latency')
-    ap.add_argument('--wave-dir', type=Path, default=ROOT / 'out')
+    ap.add_argument('--cases', default='rectangular,sparse_90,long_latency,bench_64x128x128_l23')
+    ap.add_argument('--wave-dir', type=Path, action='append', help='where the VCDs are (default: out/ and out_big/)')
     ap.add_argument('--csv', type=Path, action='append',
                     help='result CSVs (later files win); default: results/set3_results.csv + out_full/local_results_mo0.csv')
     ap.add_argument('--out', type=Path, default=ROOT / 'out/waves.html')
@@ -246,13 +257,15 @@ def main():
         payload['sets'][v] = dict(name=spec['name'], title=spec['title'], signals=sigs, waves={},
                                   params=top_params(v))
         for c in payload['cases']:
-            f = a.wave_dir / f'wave_{v}_{c}.vcd'
-            if not f.exists():
-                print(f'skip (missing) {f}'); continue
+            f = next((d / f'wave_{v}_{c}.vcd' for d in (a.wave_dir or [ROOT / 'out', ROOT / 'out_big'])
+                      if (d / f'wave_{v}_{c}.vcd').exists()), None)
+            if f is None:
+                print(f'skip (missing) wave_{v}_{c}.vcd'); continue
             data, n = parse_vcd(f, {s['path'] for s in sigs} | set(ANIM[v]))
-            data, n, off = trim(data, n)
-            payload['sets'][v]['waves'][c] = dict(n=n, offset=off, data=data)
-            print(f'{v:8s} {c:16s} {n:6d} cycles')
+            data, n, off, trunc = trim(data, n)
+            payload['sets'][v]['waves'][c] = dict(n=n, offset=off, trunc=trunc,
+                                                  data={p: encode(q) for p, q in data.items()})
+            print(f'{v:8s} {c:22s} {n:7d} cycles' + ('  (window only)' if trunc else ''))
     for (v, c), r in metrics.items():
         if v in SETS:
             payload['metrics'][f'{v}|{c}'] = {k: r[k] for k in KEYS}
@@ -339,7 +352,7 @@ Not counted: FSM/address/counter registers that baseline also has. BRAM36 = Xili
  <button class="btn" id="play">▶ Play</button>
  <button class="btn" id="stepB">◀ 1</button><button class="btn" id="stepF">1 ▶</button>
  <label style="color:var(--mute);font-size:13px">speed
-  <select id="speed" class="btn" style="padding:4px 6px"><option value="2">2</option><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option><option value="60">60</option><option value="200">200</option></select> cycles/s</label>
+  <select id="speed" class="btn" style="padding:4px 6px"><option value="2">2</option><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option><option value="60">60</option><option value="200">200</option><option value="1000">1,000</option><option value="5000">5,000</option><option value="20000">20,000</option></select> cycles/s</label>
  <input type="range" id="scrub" min="0" max="100" value="0" step="1" style="flex:1;min-width:200px">
  <span id="cycLbl" style="font-variant-numeric:tabular-nums;min-width:90px">cycle 0</span>
  <label style="color:var(--mute);font-size:13px"><input type="checkbox" id="follow" checked> move waveform cursor</label>
@@ -356,6 +369,9 @@ Set 3 reorders the loop (group → row tile → col tile in group → kk) so the
 <table id="tbl"></table>
 <script>
 const P=/*DATA*/null;
+for(const k in P.sets)for(const c in P.sets[k].waves){const w=P.sets[k].waves[c];
+ for(const p in w.data){const f=w.data[p],o=[];let t=0;for(let i=0;i<f.length;i+=2){t+=f[i];o.push([t,f[i+1]])}w.data[p]=o}}
+const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];return c.startsWith('bench_')&&m?`${m.m}×${m.n}×${m.k} · lat ${m.lat} (realistic)`:c};
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SETNAMES=Object.fromEntries(P.order.map(k=>[k,P.sets[k].name]));
 let mode='all', kase=P.cases.find(c=>P.order.some(k=>P.sets[k].waves[c]));
@@ -365,7 +381,7 @@ const ROWH=24, LBLW=170, TOP=26;
 function seg(el,items,get,set){el.innerHTML='';for(const [k,l] of items){const b=document.createElement('button');b.textContent=l;
  b.className=get()===k?'on':'';b.onclick=()=>{set(k);seg(el,items,get,set);render()};el.appendChild(b)}}
 seg(document.getElementById('setSeg'),[['all','All'],['s1s2s3','Sets 1–3'],...P.order.map(k=>[k,SETNAMES[k]])],()=>mode,v=>{mode=v;for(const k in views)views[k].fit=true});
-seg(document.getElementById('caseSeg'),P.cases.map(c=>[c,c]),()=>kase,v=>{kase=v;for(const k in views)views[k].fit=true});
+seg(document.getElementById('caseSeg'),P.cases.map(c=>[c,caseLabel(c)]),()=>kase,v=>{kase=v;for(const k in views)views[k].fit=true});
 
 function fmt(s,v){if(v===null||v===undefined)return'x';if(s.kind==='enum')return(s.enum&&s.enum[v])||String(v);
  if(s.kind==='hex')return'0x'+v.toString(16);if(s.kind==='bin'){const w=s.label==='full'?2:s.label==='ip'?2:4;return v.toString(2).padStart(w,'0')}return String(v)}
@@ -379,7 +395,7 @@ function render(){
  for(const set of sets){
   const w=P.sets[set].waves[kase];const d=document.createElement('div');d.className='view';
   const m=P.metrics[set+'|'+kase];
-  d.innerHTML=`<div class="vtitle">${P.sets[set].title}<span>${w?w.n+' cycles shown':'no waveform for this case'}${m?` · M×N×K = ${m.m}×${m.n}×${m.k}, mem latency ${m.lat}`:''}</span></div>`;
+  d.innerHTML=`<div class="vtitle">${P.sets[set].title}<span>${w?(w.trunc?`first ${w.n.toLocaleString()} cycles only — run finishes at cycle ${m?(+m.cycles).toLocaleString():'?'}`:w.n.toLocaleString()+' cycles shown'):'no waveform for this case'}${m?` · M×N×K = ${m.m}×${m.n}×${m.k}, mem latency ${m.lat}`:''}</span></div>`;
   box.appendChild(d);if(!w)continue;
   const cv=document.createElement('canvas');d.appendChild(cv);
   const v=views[set]||(views[set]={x0:0,ppc:8,fit:true,hover:null,pin:null});
@@ -432,6 +448,11 @@ function draw(v){
   const maxv=s.style==='analog'?Math.max(1,...ch.map(e=>e[1]||0)):1;
   for(;k<ch.length&&ch[k][0]<=c1;k++){
    const a=ch[k][0],b=k+1<ch.length?ch[k+1][0]:n,val=ch[k][1];const xa=Math.max(LBLW-2,X(a)),xb=Math.min(W+2,X(b));
+   if(xb-xa<1&&k+1<ch.length){                 // many changes inside one pixel: draw one dense block
+    const px=Math.floor(xa)+1,cEnd=v.x0+(px+1-LBLW)/v.ppc;let lo=k,hi=ch.length-1;
+    while(lo<hi){const mm=(lo+hi+1)>>1;if(ch[mm][0]<=cEnd)lo=mm;else hi=mm-1}
+    if(lo-1>k){g.fillStyle=s.kind==='bit'?C.hi:C.bus;g.globalAlpha=.55;g.fillRect(xa,yt,px+1-xa,yb-yt);g.globalAlpha=1;k=lo-1;continue}
+   }
    if(val===null){g.fillStyle=C.x;g.globalAlpha=.25;g.fillRect(xa,yt,xb-xa,yb-yt);g.globalAlpha=1;continue}
    if(s.kind==='bit'){
     const yy=val?yt:yb;if(val){g.fillStyle=C.hiF;g.fillRect(xa,yt,xb-xa,yb-yt)}
@@ -480,7 +501,9 @@ function stats(){
  const w3=P.sets.s3_all.waves[kase];let setup=null;
  if(w3){const st=w3.data['tb_local.dut.control.state'];const i=st.findIndex(e=>e[1]===4);if(i>=0&&i+1<st.length)setup=st[i+1][0]-st[i][0]}
  const diff=m&&m2?(+m.cycles)-(+m2.cycles):null;
- document.getElementById('note').textContent=m&&+m.m<=4?
+ document.getElementById('note').textContent=m&&+m.m>4?
+  `What to watch: ${+m.m/4} row tiles × ${+m.n/4} col tiles × K=${m.k}. Set 2 fills its 16 KB B buffer during row tile 0 and reads it for every later row tile. Set 3 fills its 4 KB buffer during row tile 0 of each group of G=${Math.max(1,Math.min(+m.n/4,Math.floor((P.sets.s3_all.params.BBUF_DEPTH||1024)/+m.k)))} col tiles (the group range in gemm_control), then reuses it for the other row tiles. Baseline and Set 1 are far slower, so only their first cycles are recorded.`:
+  m&&+m.m<=4?
   `Note: M=${m.m} fits in one row tile, so Set 3 has nothing to group (B is never reused across row tiles) and runs the same loop as Set 2. `+
   (diff>0?`The ${diff} extra cycle${diff>1?'s':''} (${m.cycles} vs ${m2.cycles}) come from Set 3's start-up SETUP state that picks G${setup?` (${setup} cycles in the waveform)`:''}. `:
    diff===0?`Cycle counts are equal: Set 3's SETUP state${setup?` (${setup} cycles)`:''} is hidden behind the memory latency. `:'')+
@@ -554,10 +577,10 @@ function prepAnim(set){
  if(set==='s3_all'){ev.gs=d(Cp+'grp_start');ev.gw=d(Cp+'gw')}
  // pair requests with (in-order) responses
  const q=[],reqs=[];for(let c=0;c<n;c++){if(ev.memRsp[c]&&q.length){q.shift().r=c}if(ev.memReq[c]){const o={q:c,b:ev.isB[c],r:null};q.push(o);reqs.push(o)}}
- ev.reqs=reqs;const cum=a=>{const o=new Int32Array(n);let s=0;for(let c=0;c<n;c++){s+=a[c];o[c]=s}return o};
+ ev.reqs=reqs;ev.byRsp=new Map(reqs.filter(o=>o.r!=null).map(o=>[o.r,o]));ev.trunc=!!w.trunc;const cum=a=>{const o=new Int32Array(n);let s=0;for(let c=0;c<n;c++){s+=a[c];o[c]=s}return o};
  ev.cA=cum(ev.memReq.map((x,i)=>x&&!ev.isB[i]?1:0));ev.cB=cum(ev.memReq.map((x,i)=>x&&ev.isB[i]?1:0));
  ev.cOp=cum(ev.op);ev.cOut=cum(ev.out);ev.cARd=cum(ev.aRd);ev.cBRd=cum(ev.bRd);ev.cSkip=cum(ev.skip);
- ev.end=(()=>{for(let c=0;c<n;c++)if(ev.done[c])return c;return n-1})();ev.n=n;return ev}
+ ev.end=(()=>{for(let c=0;c<n;c++)if(ev.done[c])return c;return n-1})();ev.m=P.metrics[set+'|'+kase];ev.n=n;return ev}
 function box(g,x,y,w,h,title,sub){const r=mk('rect',{x,y,width:w,height:h,rx:8,fill:'var(--panel)',stroke:'var(--line)','stroke-width':1.5},g);
  mk('text',{x:x+10,y:y+18,'font-size':13,'font-weight':600,fill:'var(--ink)'},g,title);if(sub)mk('text',{x:x+w-10,y:y+18,'font-size':11,fill:'var(--mute)','text-anchor':'end'},g,sub);return r}
 function arrow(g,d,lbl,lx,ly){const p=mk('path',{d,fill:'none',stroke:'var(--line)','stroke-width':3,'marker-end':'url(#ah)'},g);
@@ -631,7 +654,7 @@ function update(D,t,prevT){
  const f=(arr)=>{const k=anyIn(arr,c0,c);return k};
  let k=f(ev.reqIn);tok(E.aReq,k>=0,k===c?p:1,COL.req);
  k=f(ev.memReq);tok(E.aMem,k>=0,k===c?p:1,k>=0&&ev.isB[k]?COL.B:COL.A);
- k=f(ev.memRsp);let rb=null;if(k>=0){const r=ev.reqs.find(o=>o.r===k);rb=r?r.b:0}tok(E.aRsp,k>=0,k===c?p:1,rb?COL.B:COL.A);
+ k=f(ev.memRsp);let rb=null;if(k>=0){const r=ev.byRsp.get(k);rb=r?r.b:0}tok(E.aRsp,k>=0,k===c?p:1,rb?COL.B:COL.A);
  k=f(ev.op);tok(E.aOp,k>=0,k===c?p:1,COL.op);k=f(ev.out);tok(E.aOut,k>=0,k===c?p:1,COL.out);
  // memory pipe
  const inf=ev.reqs.filter(o=>o.q<=t&&(o.r===null||o.r>t));while(E.memG.firstChild)E.memG.firstChild.remove();
@@ -660,8 +683,12 @@ function update(D,t,prevT){
  sa(E.mac,'fill',anyIn(ev.op,c0,c)>=0?COL.op:'var(--grp)');E.mac.setAttribute('fill-opacity',.45);
  sa(E.wr,'fill',anyIn(ev.out,c0,c)>=0?COL.out:'var(--grp)');E.wr.setAttribute('fill-opacity',.45);
  E.macT.textContent=`packets ${ev.cOp[c]}`;E.wrT.textContent=`outputs ${ev.cOut[c]}`;
- const fin=c>=ev.end;E.doneT.textContent=fin?`done ✓ cycle ${ev.end}`:'';
- document.getElementById('st_'+D.set).textContent=fin?`finished at cycle ${ev.end}`:`cycle ${c} / ${ev.end}`;
+ const fin=c>=ev.end&&!ev.trunc,M=ev.m;E.doneT.textContent=fin?`done ✓ cycle ${ev.end}`:'';
+ const pct=M?(100*ev.cOut[c]/(M.m*M.n)).toFixed(1)+'% of outputs':'';
+ document.getElementById('st_'+D.set).textContent=fin?`finished at cycle ${ev.end.toLocaleString()}`:
+  ev.trunc&&c>=ev.end?`still running — ${pct} done at cycle ${c.toLocaleString()} (finishes at ${M?(+M.cycles).toLocaleString():'?'}; waveform window ends here)`:
+  `cycle ${c.toLocaleString()} · ${pct}`;
+ if(ev.trunc&&c>=ev.end)E.doneT.textContent=`${pct.split(' ')[0]} done`;
 }
 function buildDiagrams(){
  const box=document.getElementById('diagrams');box.innerHTML='';for(const k in dgs)delete dgs[k];

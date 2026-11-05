@@ -71,6 +71,7 @@ def main():
     p.add_argument('--memmaxout', type=int, default=0, help='0 = pipelined memory, 1 = one outstanding request')
     p.add_argument('--out', type=Path, default=ROOT/'out')
     p.add_argument('--vcd', action='store_true', help='save a waveform per run: out/wave_<variant>_<case>.vcd')
+    p.add_argument('--vcd-cycles', type=int, default=0, help='with --vcd: only dump the first N cycles (0 = all)')
     a = p.parse_args()
     vec = a.out/'vectors'; names = suite(vec, a.extended)
     for n_, kw in BENCH:                      # extra benchmark fixtures (not in the official suite)
@@ -81,7 +82,8 @@ def main():
         exe = build(v, a.out)
         for c in cases:
             r = subprocess.run(['vvp','-n',str(exe),f'+CASEDIR={vec/c}',f'+MEMMAXOUT={a.memmaxout}']
-                               + ([f'+VCD={a.out}/wave_{v}_{c}.vcd'] if a.vcd else []),
+                               + ([f'+VCD={a.out}/wave_{v}_{c}.vcd'] if a.vcd else [])
+                               + ([f'+VCDCYC={a.vcd_cycles}'] if a.vcd and a.vcd_cycles else []),
                                capture_output=True, text=True, timeout=3600)
             ok = 'LOCAL PASS' in r.stdout
             for line in r.stdout.splitlines():
