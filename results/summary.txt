@@ -1,0 +1,78 @@
+
+rectangular  (m=3 n=7 k=5 latency=1)
+variant           cycles  speedup     reads reads vs base
+baseline             203    1.00x        65         +0.0%
+s1_areuse            173    1.17x        50        -23.1%
+s1_areuse_zs         173    1.17x        50        -23.1%
+s1_dbuf              195    1.04x        65         +0.0%
+s1_all               165    1.23x        50        -23.1%
+s2_p1_2a             144    1.41x        50        -23.1%
+s2_2b_only           111    1.83x        65         +0.0%
+s2_p1_2               96    2.11x        50        -23.1%
+s2_all                96    2.11x        50        -23.1%
+
+sparse_90  (m=4 n=9 k=13 latency=1)
+variant           cycles  speedup     reads reads vs base
+baseline             719    1.00x       273         +0.0%
+s1_areuse            537    1.34x       169        -38.1%
+s1_areuse_zs         407    1.77x       119        -56.4%
+s1_dbuf              683    1.05x       273         +0.0%
+s1_all               371    1.94x       119        -56.4%
+s2_p1_2a             337    2.13x       119        -56.4%
+s2_2b_only           341    2.11x       273         +0.0%
+s2_p1_2              209    3.44x       119        -56.4%
+s2_all               209    3.44x       119        -56.4%
+
+long_latency  (m=3 n=5 k=11 latency=23)
+variant           cycles  speedup     reads reads vs base
+baseline            3093    1.00x       121         +0.0%
+s1_areuse           2296    1.35x        88        -27.3%
+s1_areuse_zs        2296    1.35x        88        -27.3%
+s1_dbuf             3071    1.01x       121         +0.0%
+s1_all              2263    1.37x        88        -27.3%
+s2_p1_2a            2184    1.42x        88        -27.3%
+s2_2b_only           281   11.01x       121         +0.0%
+s2_p1_2              261   11.85x        88        -27.3%
+s2_all               261   11.85x        88        -27.3%
+
+bench64_lat1  (m=64 n=64 k=64 latency=1)
+variant           cycles  speedup     reads reads vs base
+baseline          299522    1.00x    131072         +0.0%
+s1_areuse         192002    1.56x     69632        -46.9%
+s1_areuse_zs      192002    1.56x     69632        -46.9%
+s1_dbuf           283394    1.06x    131072         +0.0%
+s1_all            175874    1.70x     69632        -46.9%
+s2_p1_2a          144642    2.07x     69632        -46.9%
+s2_2b_only        136706    2.19x    131072         +0.0%
+s2_p1_2            75266    3.98x     69632        -46.9%
+s2_all             27776   10.78x      8192        -93.8%
+
+bench64_lat23  (m=64 n=64 k=64 latency=23)
+variant           cycles  speedup     reads reads vs base
+baseline         3183106    1.00x    131072         +0.0%
+s1_areuse        1723906    1.85x     69632        -46.9%
+s1_areuse_zs     1723906    1.85x     69632        -46.9%
+s1_dbuf          3166978    1.01x    131072         +0.0%
+s1_all           1707778    1.86x     69632        -46.9%
+s2_p1_2a         1676546    1.90x     69632        -46.9%
+s2_2b_only        150018   21.22x    131072         +0.0%
+s2_p1_2           131778   24.16x     69632        -46.9%
+s2_all             34788   91.50x      8192        -93.8%
+
+bench64_sp90_lat23  (m=64 n=64 k=64 latency=23)
+variant           cycles  speedup     reads reads vs base
+baseline         3183106    1.00x    131072         +0.0%
+s1_areuse        1723906    1.85x     69632        -46.9%
+s1_areuse_zs      792226    4.02x     30812        -76.5%
+s1_dbuf          3166978    1.01x    131072         +0.0%
+s1_all            776098    4.10x     30812        -76.5%
+s2_p1_2a          763841    4.17x     30812        -76.5%
+s2_2b_only        150018   21.22x    131072         +0.0%
+s2_p1_2           106218   29.97x     30812        -76.5%
+s2_all             34788   91.50x      8192        -93.8%
+
+max_dimensions  (m=64 n=128 k=1024 latency=1)
+variant           cycles  speedup     reads reads vs base
+baseline         9446402    1.00x   4194304         +0.0%
+s1_all           5367298    1.76x   2162688        -48.4%
+s2_all           1974184    4.78x   1916928        -54.3%
