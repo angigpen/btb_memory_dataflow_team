@@ -78,6 +78,68 @@ SETS = {
     ]) + MEM + SLOT_LOADER + OUT),
 }
 
+# ---------------- on-chip storage, computed from the RTL declarations ----------------
+import math, re as _re
+SRC_DIR = {'baseline': 'baseline', 's1_all': 'set1_phase1_2a', 's2_all': 'set2_all_phases', 's3_all': 'set3_grouped_b'}
+
+
+def top_params(v):
+    txt = (ROOT / SRC_DIR[v] / 'gemm_top.v').read_text()
+    hdr = _re.sub(r'//[^\n]*', '', txt[txt.index('module gemm_top'):txt.index(')(')])
+    return {k: int(x) for k, x in _re.findall(r'(\w+)\s*=\s*(\d+)', hdr)}
+
+
+def bram36(depth, width):
+    """Xilinx block RAM count (BRAM36 units, BRAM18 = 0.5) for a depth x width simple dual-port RAM."""
+    b36 = min(math.ceil(depth / d) * math.ceil(width / w) for d, w in
+              [(32768, 1), (16384, 2), (8192, 4), (4096, 9), (2048, 18), (1024, 36), (512, 72)])
+    b18 = min(math.ceil(depth / d) * math.ceil(width / w) for d, w in
+              [(16384, 1), (8192, 2), (4096, 4), (2048, 9), (1024, 18), (512, 36)])
+    return min(b36, b18 / 2)
+
+
+def memory(v, over=None):
+    """Itemised data storage of the operand path: [dict(name, shape, bits, bram, kind, src)]."""
+    P = top_params(v); P.update(over or {})
+    R, C = P['PE_ROWS'], P['PE_COLS']
+    pkt = 8 * R + 8 * C + R + C + 2                    # A, B, row/col masks, first, last
+    it = []
+    if v == 'baseline':
+        it.append(dict(key='pkt', name='Packet data (1 register)', shape=f'1 × {pkt} b', bits=pkt, bram=0, kind='FF',
+                       src='op_a, op_b, op_rows, op_cols, op_first, op_last'))
+        return it
+    if v == 's1_all':
+        ns = 2 if P.get('USE_DBUF', 1) else 1
+        it.append(dict(key='pkt', name='Packet data (Ping/Pong slots)', shape=f'{ns} × {pkt} b', bits=ns * pkt, bram=0, kind='FF',
+                       src='s_a, s_b, s_rows, s_cols, s_first, s_last'))
+        if P.get('USE_A_REUSE', 1):
+            d = P['ACACHE_DEPTH']
+            it.append(dict(key='acache', name='A cache (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
+                           bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_cache'))
+        return it
+    ni = R + C; iw = math.ceil(math.log2(ni)); ns = P['NSLOTS']; mo = P['MAX_OUT']
+    sb = max(1, math.ceil(math.log2(ns)))
+    trk = 32 + 32 + 16 + 32 + 2 + ni + 3 * (iw + 1)    # s_aaddr, s_baddr, s_kk, s_bba, s_fill*, s_rem, s_*left
+    it.append(dict(key='pkt', name='Packet data (slots)', shape=f'{ns} × {pkt} b', bits=ns * pkt, bram=0, kind='FF',
+                   src='s_a, s_b, s_rows, s_cols, s_first, s_last'))
+    it.append(dict(key='trk', name='Slot request tracking', shape=f'{ns} × {trk} b', bits=ns * trk, bram=0, kind='FF',
+                   src='s_aaddr, s_baddr, s_kk, s_bba, s_filla/b, s_rem, s_left, s_aleft/bleft'))
+    it.append(dict(key='tag', name='Tag FIFO (requests in flight)', shape=f'{mo} × {sb + iw} b', bits=mo * (sb + iw), bram=0,
+                   kind='FF/LUTRAM', src='tag_s, tag_i'))
+    if P.get('USE_A_REUSE', 1):
+        d = P['ACACHE_DEPTH']
+        it.append(dict(key='acache', name='A cache (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
+                       bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_cache'))
+    if P.get('USE_B_REUSE', 1):
+        d = P['BBUF_DEPTH']
+        it.append(dict(key='bbuf', name='B buffer', shape=f'{d} × {8 * C} b', bits=d * 8 * C, bram=bram36(d, 8 * C), kind='BRAM',
+                       src='sdp_ram b_buf'))
+    if v == 's3_all':
+        it.append(dict(key='grp', name='Group registers (gemm_control)', shape='4 × 16 b + 32 b + 1 state bit', bits=4 * 16 + 32 + 1,
+                       bram=0, kind='FF', src='grp_start, grp_end, gw, g_cnt, g_acc, state[2]'))
+    return it
+
+
 def parse_vcd(path, wanted):
     """Return {path: [[cycle, value], ...]} (change list, value None = x/z) and the cycle count."""
     ids, stack = {}, []        # vcd id -> list of wanted paths
@@ -182,12 +244,20 @@ def main():
            ('s3_buf1k', 'Set 3', '1 KB (G=2)'), ('s3_buf2k', 'Set 3', '2 KB (G=4)'), ('s3_all', 'Set 3 (default)', '4 KB (G=8)'),
            ('s3_buf8k', 'Set 3', '8 KB (G=16)'), ('s2_all', 'Set 2 (default)', '16 KB (all of B)'),
            ('s3_buf16k', 'Set 3', '16 KB (all of B)')]
+    payload['memory'] = {v: memory(v) for v in SETS}
+    def total_bits(v):
+        base, over = {'s2_buf4k': ('s2_all', dict(BBUF_DEPTH=1024)), 's3_buf1k': ('s3_all', dict(BBUF_DEPTH=256)),
+                      's3_buf2k': ('s3_all', dict(BBUF_DEPTH=512)), 's3_buf8k': ('s3_all', dict(BBUF_DEPTH=2048)),
+                      's3_buf16k': ('s3_all', dict(BBUF_DEPTH=4096))}.get(v, (v, None))
+        it = memory(base, over)
+        return sum(x['bits'] for x in it), sum(x['bram'] for x in it)
     for v, name, buf in BUF:
         r1, r23 = metrics.get((v, 'bench_64x128x128')), metrics.get((v, 'bench_64x128x128_l23'))
         if r1 or r23:
             r = r1 or r23
             payload['buffers'].append(dict(v=v, name=name, buf=buf, c1=r1 and r1['cycles'], c23=r23 and r23['cycles'],
-                                           reads=int(r['a_reads']) + int(r['b_reads'])))
+                                           reads=int(r['a_reads']) + int(r['b_reads']),
+                                           mem_bits=total_bits(v)[0], bram=total_bits(v)[1]))
     html = TEMPLATE.replace('/*DATA*/null', json.dumps(payload, separators=(',', ':')))
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(html)
@@ -221,7 +291,7 @@ canvas{display:block;width:100%;cursor:crosshair}
 table{border-collapse:collapse;margin:0 24px 30px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-variant-numeric:tabular-nums}
 th,td{padding:6px 14px;border-bottom:1px solid var(--line);text-align:right}th{font-size:12px;color:var(--mute);font-weight:600}
 td:first-child,th:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
-h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute);font-size:13px;max-width:980px}.best{font-weight:700}tr.grpTop td{border-top:2px solid var(--line)}
+h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute);font-size:13px;max-width:980px}.best{font-weight:700}.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:8px;margin-left:6px;border:1px solid var(--line)}.tag.new{background:var(--hiF);color:var(--hi);border-color:var(--hi)}.tag.up{background:var(--busF);color:var(--bus);border-color:var(--bus)}.tag.down{color:var(--mute)}tr.sub td{color:var(--mute);font-size:12px}tr.tot td{font-weight:600}tr.grpTop td{border-top:2px solid var(--line)}
 </style></head><body>
 <header><h1>GEMM operand loader — simulation waveforms</h1>
 <p>Baseline, Set 1 (Phase 1 + 2a), Set 2 (all phases) and Set 3 (Set 2 + grouped B reuse), from the local Icarus runs (<code>tb_local.sv</code>). One column = one clock cycle, sampled just before the rising edge.</p></header>
@@ -233,6 +303,13 @@ h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute
  <span class="hint">wheel / pinch = zoom · drag = pan · hover = values · click = pin cursor</span>
 </div>
 <table id="cmp" style="margin-bottom:8px"></table><p class="note" id="note"></p>
+<h2>Additional on-chip memory (default parameters, from the RTL declarations)</h2>
+<table id="memSum"></table>
+<table id="memItems"></table>
+<p class="note">Counted: data storage on the operand path — packet registers/slots, request tracking, tag FIFO, A cache, B buffer (bit widths
+taken from the <code>reg</code>/<code>sdp_ram</code> declarations and each set's <code>gemm_top.v</code> defaults; PE 4×4).
+Not counted: FSM/address/counter registers that baseline also has. BRAM36 = Xilinx block RAM count by aspect ratio
+(1K×36, 4K×9, …; BRAM18 = 0.5); Vivado may map small RAMs to LUTRAM instead. Yosys estimate in the README: Set 1 ≈ 1 BRAM36 / +100 FF, Set 2 ≈ 5 BRAM36 / +300 FF.</p>
 <div id="views"></div>
 <h2>Set 3 B-buffer sweep — 64×128×128 (from <code>results/set3_results.csv</code>)</h2>
 <p class="note">Where Set 3 matters: B for 64×128×128 is 16 KB. With the same 4 KB buffer, Set 2 can only reuse the column tiles that fit;
@@ -372,6 +449,26 @@ function stats(){
    diff===0?`Cycle counts are equal: Set 3's SETUP state${setup?` (${setup} cycles)`:''} is hidden behind the memory latency. `:'')+
   'See the 64×128×128 sweep below for Set 3\'s gain.':'';
 }
+function kb(b){b=+b;return b>=8192?(b/8192).toFixed(2)+' KB':b>=8?(b/8).toFixed(b%8?1:0)+' B':b+' b'}
+function memTables(){
+ const tot=v=>P.memory[v].reduce((a,x)=>a+x.bits,0),br=v=>P.memory[v].reduce((a,x)=>a+x.bram,0);
+ const ram=v=>P.memory[v].filter(x=>x.kind==='BRAM').reduce((a,x)=>a+x.bits,0);
+ const sgn=d=>(d>0?'+':d<0?'−':'±')+kb(Math.abs(d));
+ let h='<tr><th>variant</th><th>total storage</th><th>in block RAM</th><th>BRAM36</th><th>in flip-flops</th><th>added vs baseline</th><th>added vs previous set</th></tr>';
+ P.order.forEach((v,i)=>{const t=tot(v),pv=i?P.order[i-1]:null;
+  h+=`<tr class="tot"><td>${SETNAMES[v]}</td><td>${kb(t)} <span style="color:var(--mute);font-weight:400">(${t.toLocaleString()} b)</span></td><td>${kb(ram(v))}</td><td>${br(v)}</td><td>${kb(t-ram(v))}</td>
+   <td>${i?sgn(t-tot('baseline')):'—'}</td><td>${pv?sgn(t-tot(pv))+` <span style="color:var(--mute);font-weight:400">vs ${SETNAMES[pv]}</span>`:'—'}</td></tr>`});
+ document.getElementById('memSum').innerHTML=h;
+ let g='<tr><th>variant</th><th>structure</th><th>size</th><th>bits</th><th>bytes</th><th>BRAM36</th><th>type</th><th>RTL</th></tr>';
+ P.order.forEach((v,i)=>{const prev=i?Object.fromEntries(P.memory[P.order[i-1]].map(x=>[x.key,x])):{};
+  P.memory[v].forEach((x,j)=>{const p=prev[x.key];let tag='';
+   if(i){if(!p)tag='<span class="tag new">new</span>';else if(x.bits>p.bits)tag=`<span class="tag up">grown ${sgn(x.bits-p.bits)}</span>`;
+    else if(x.bits<p.bits)tag=`<span class="tag down">smaller ${sgn(x.bits-p.bits)}</span>`}
+   g+=`<tr class="${j?'':'grpTop'}"><td>${j?'':SETNAMES[v]}</td><td style="text-align:left">${x.name}${tag}</td><td>${x.shape}</td><td>${x.bits.toLocaleString()}</td><td>${kb(x.bits)}</td><td>${x.bram||'—'}</td><td>${x.kind}</td><td style="text-align:left"><code>${x.src}</code></td></tr>`});
+  const t=P.memory[v].reduce((a,x)=>a+x.bits,0);
+  g+=`<tr class="sub"><td></td><td style="text-align:left">total</td><td></td><td>${t.toLocaleString()}</td><td>${kb(t)}</td><td>${br(v)}</td><td></td><td></td></tr>`});
+ document.getElementById('memItems').innerHTML=g;
+}
 function table(){
  const cs=[...new Set(Object.keys(P.metrics).map(k=>k.split('|')[1]))];
  let h='<tr><th>case</th><th>variant</th><th>M×N×K</th><th>lat</th><th>cycles</th><th>speedup</th><th>A reads</th><th>B reads</th><th>max in flight</th></tr>';
@@ -379,9 +476,9 @@ function table(){
   h+=`<tr class="${v===P.order.find(x=>P.metrics[x+'|'+c])?'grpTop':''}"><td>${v===P.order.find(x=>P.metrics[x+'|'+c])?c:''}</td><td>${SETNAMES[v]}</td><td>${m.m}×${m.n}×${m.k}</td><td>${m.lat}</td><td>${(+m.cycles).toLocaleString()}</td>
    <td>${b?(b.cycles/m.cycles).toFixed(2)+'×':''}</td><td>${(+m.a_reads).toLocaleString()}</td><td>${(+m.b_reads).toLocaleString()}</td><td>${m.max_outstanding}</td></tr>`}
  document.getElementById('tbl').innerHTML=h;
- const B=P.buffers,b0=B.find(x=>x.v==='baseline');const num=x=>x==null?'—':(+x).toLocaleString();
- let g='<tr><th>variant</th><th>B buffer</th><th>cycles (lat 1)</th><th>speedup</th><th>cycles (lat 23)</th><th>speedup</th><th>total reads</th><th>read change</th></tr>';
- for(const r of B){g+=`<tr class="${r.v==='s3_all'?'best':''}"><td>${r.name}</td><td>${r.buf}</td><td>${num(r.c1)}</td><td>${b0&&r.c1?(b0.c1/r.c1).toFixed(1)+'×':''}</td>
+ const B=P.buffers,b0=B.find(x=>x.v==='baseline');memTables();const num=x=>x==null?'—':(+x).toLocaleString();
+ let g='<tr><th>variant</th><th>B buffer</th><th>on-chip storage</th><th>BRAM36</th><th>cycles (lat 1)</th><th>speedup</th><th>cycles (lat 23)</th><th>speedup</th><th>total reads</th><th>read change</th></tr>';
+ for(const r of B){g+=`<tr class="${r.v==='s3_all'?'best':''}"><td>${r.name}</td><td>${r.buf}</td><td>${kb(r.mem_bits)}</td><td>${r.bram}</td><td>${num(r.c1)}</td><td>${b0&&r.c1?(b0.c1/r.c1).toFixed(1)+'×':''}</td>
   <td>${num(r.c23)}</td><td>${b0&&r.c23?(b0.c23/r.c23).toFixed(1)+'×':''}</td><td>${num(r.reads)}</td><td>${b0&&r.v!=='baseline'?((r.reads/b0.reads-1)*100).toFixed(1)+'%':'—'}</td></tr>`}
  document.getElementById('buf').innerHTML=g;
 }
