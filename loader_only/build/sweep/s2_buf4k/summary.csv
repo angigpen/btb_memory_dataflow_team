@@ -1,0 +1,3 @@
+case,run,m,n,k,pe_rows,pe_cols,cycles,mac_cycles,mac_slots,nonzero_mac_slots,a_reads,b_reads,request_stall,response_stall,operand_wait,compute_stall,output_stall,latency
+bench_64x128x128,0,64,128,128,4,4,650775,65536,1048576,1040588,8192,200704,0,208896,575511,0,0,1
+bench_64x128x128_l23,0,64,128,128,4,4,5246487,65536,1048576,1040588,8192,200704,0,4804608,5171223,0,0,23

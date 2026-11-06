@@ -1,0 +1,20 @@
+{
+  "m": 8,
+  "n": 19,
+  "k": 47,
+  "seed": 504,
+  "sparsity": 0,
+  "pattern": "random",
+  "latency": 2,
+  "stalls": 2,
+  "output_stalls": 2,
+  "runs": 1,
+  "dense_mac_count": 7144,
+  "zero_product_count": 89,
+  "sha256": {
+    "a.hex": "13b11dcd08b2b9210dc124bde6d10066e4db20ea72902b2a82337a28b373a8ca",
+    "b.hex": "33c8195f19717d00cc465c4280342eed050f5dcb9b2c292f0632f8df0311529f",
+    "c.hex": "41c9dde4da65a531bb4fda1a86044ac082ba64be2da372e8e3348eb6ef5155ef",
+    "config.hex": "e8f54b87170a1826f55fc67c0eb958f8eef32b83274e36792b268c5b44b8b0ba"
+  }
+}
