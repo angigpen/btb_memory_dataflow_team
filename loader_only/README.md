@@ -131,6 +131,27 @@ python3 scripts/vcd_to_html.py      # -> build/waves.html
 - 파형 저장은 `tb/wave_dump.v`가 합니다. 공식 `tb_gemm.sv`는 고치지 않고 옆에 같이 컴파일합니다 (`run_official.py --vcd`).
 - 표 숫자: `results/*.csv` (전체 suite)와 `build/**/summary.csv` (파형·sweep 실행).
 
+### 애니메이션의 A/B reuse buffer 내용
+
+각 다이어그램 아래에 현재 RAM entry의 INT8 값, 원래 행/열·k 좌표, A의 zero flag를 표시합니다.
+슬라이더를 되돌리면 그 시점까지의 write만 다시 적용합니다. `미저장`, 값이 모두 `0`인 word,
+zero skip으로 `valid=0`인 B entry, 이전 행/그룹의 잔여 데이터를 구분합니다.
+현재 접근한 entry를 자동으로 따라가거나 체크를 풀고 entry 페이지를 직접 넘길 수 있습니다.
+
+RAM 배열 자체는 기존 VCD에 없으므로, 기록된 `aw_pend`/`bw_pend` write-enable과 완료된
+메모리 read 주소를 공식 `a.hex`/`b.hex`와 대조해 재구성합니다. 요청을 보낸 것만으로
+버퍼가 채워졌다고 표시하지 않으며, 상승 에지 c의 write는 기존 파형의 샘플 규칙에 맞춰
+c+1부터 보입니다. 다른 입력을 런타임에 덮어쓰는 테스트에는 그 변경 이력까지 필요합니다.
+
+저장소에 원본 VCD가 없으면 기존 HTML의 파형·측정값을 보존해 재생성할 수 있습니다:
+
+```
+python3 scripts/vcd_to_html.py --from-html build/waves.html
+python3 -m unittest discover -s scripts -p test_buffer_trace.py
+```
+
+`--from-html`은 새 시뮬레이션을 실행하지 않습니다. RTL 및 성능 측정값도 변경하지 않습니다.
+
 ## 자원 (Yosys로 추정, Vivado 아님)
 
 | | BRAM | FF | DSP |

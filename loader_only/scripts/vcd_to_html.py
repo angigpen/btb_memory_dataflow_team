@@ -12,6 +12,7 @@ Values are sampled once per clock, just before each rising edge (what the flops 
 """
 import argparse, csv, json
 from pathlib import Path
+from buffer_trace import add_buffer_traces
 
 ROOT = Path(__file__).resolve().parents[1]
 CTRL_ST = {0: 'IDLE', 1: 'ISSUE', 2: 'RESULT', 3: 'WRITE'}
@@ -256,8 +257,19 @@ def main():
     ap.add_argument('--cases', default='rectangular,sparse_90,long_latency,bench_64x128x128_l23')
     ap.add_argument('--build', type=Path, default=ROOT / 'build', help='run_official.py build root (waveforms, sweep)')
     ap.add_argument('--out', type=Path, default=ROOT / 'build/waves.html')
+    ap.add_argument('--from-html', type=Path, help='reuse embedded waves/metrics when the original VCD files are unavailable')
     a = ap.parse_args()
     B = a.build
+    if a.from_html:
+        text = a.from_html.read_text()
+        start = text.index('const P=') + len('const P=')
+        payload, _ = json.JSONDecoder().raw_decode(text[start:])
+        add_buffer_traces(payload, B)
+        html = TEMPLATE.replace('/*DATA*/null', json.dumps(payload, separators=(',', ':')))
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text(html)
+        print(f'-> {a.out} ({a.out.stat().st_size // 1024} KB)')
+        return
     # waveform folders per variant (wave_<case>.vcd); *_big = long case, first 160k cycles only
     WAVES = {'baseline': ['baseline', 'baseline_big'], 's1_all': ['set1', 'set1_big'], 's2_all': ['set2'], 's3_all': ['set3']}
     # result CSVs (official summary.csv format, + latency column); later files win
@@ -312,6 +324,7 @@ def main():
             payload['buffers'].append(dict(v=v, name=name, buf=buf, c1=r1 and r1['cycles'], c23=r23 and r23['cycles'],
                                            reads=int(r['a_reads']) + int(r['b_reads']),
                                            mem_bits=total_bits(v)[0], bram=total_bits(v)[1]))
+    add_buffer_traces(payload, B)
     html = TEMPLATE.replace('/*DATA*/null', json.dumps(payload, separators=(',', ':')))
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(html)
@@ -351,6 +364,22 @@ h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute
 .dg .vtitle{padding:8px 14px;flex-wrap:wrap;font-size:calc(14px - var(--dgcols,2) * 0.5px)}.dg svg{display:block;width:100%;height:auto}
 .dg canvas.mx{display:block;width:100%;height:auto;border-top:1px solid var(--line)}
 .dg p{margin:0;padding:0 14px 10px;color:var(--mute);font-size:12.5px}
+.dg{container-type:inline-size}
+.buffer-panels{display:grid;grid-template-columns:1fr;gap:16px;padding:14px;border-top:1px solid var(--line)}
+@container (min-width:760px){.buffer-panels{grid-template-columns:1fr 1fr}}
+.reuse-buffer{min-width:0}.reuse-buffer h3{font-size:14px;margin:0 0 5px}
+.buffer-meta,.buffer-scope{font-size:12px;color:var(--mute);margin:4px 0;overflow-wrap:anywhere}
+.buffer-tools{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:9px 0;font-size:12px}
+.buffer-tools button{font-size:12px;padding:4px 8px}.buffer-tools label{display:flex;align-items:center;gap:4px}
+.buffer-table{width:100%;margin:0;border:0;border-radius:0;table-layout:fixed;font-size:12px}
+.buffer-table th,.buffer-table td{padding:6px 4px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.buffer-table th:first-child{width:50px}.buffer-table th:nth-child(2){width:28%}
+.buffer-table .old{color:var(--mute)}.buffer-table .read-entry{background:var(--hiF)}
+.buffer-table .write-entry{background:var(--busF)}
+.buffer-word{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;font-variant-numeric:tabular-nums}
+.buffer-word span{padding:3px 0;text-align:center;background:var(--grp)}
+.buffer-status{display:block;font-size:12px;color:var(--mute);margin-top:3px}
+.buffer-caption{grid-column:1/-1;font-size:12px;color:var(--mute)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 24px 10px;font-size:12px;color:var(--mute)}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:5px}
 svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -612,7 +641,7 @@ function prepAnim(set){
  ev.reqs=reqs;ev.byRsp=new Map(reqs.filter(o=>o.r!=null).map(o=>[o.r,o]));ev.trunc=!!w.trunc;const cum=a=>{const o=new Int32Array(n);let s=0;for(let c=0;c<n;c++){s+=a[c];o[c]=s}return o};
  ev.cA=cum(ev.memReq.map((x,i)=>x&&!ev.isB[i]?1:0));ev.cB=cum(ev.memReq.map((x,i)=>x&&ev.isB[i]?1:0));
  ev.cOp=cum(ev.op);ev.cOut=cum(ev.out);ev.cARd=cum(ev.aRd);ev.cBRd=cum(ev.bRd);ev.cSkip=cum(ev.skip);
- ev.end=(()=>{for(let c=0;c<n;c++)if(ev.done[c])return c;return n-1})();ev.m=P.metrics[set+'|'+kase];ev.n=n;return ev}
+ ev.end=(()=>{for(let c=0;c<n;c++)if(ev.done[c])return c;return n-1})();ev.m=P.metrics[set+'|'+kase];ev.n=n;ev.buffers=w.buffers;return ev}
 function box(g,x,y,w,h,title,sub){const r=mk('rect',{x,y,width:w,height:h,rx:8,fill:'var(--panel)',stroke:'var(--line)','stroke-width':1.5},g);
  mk('text',{x:x+10,y:y+18,'font-size':13,'font-weight':600,fill:'var(--ink)'},g,title);if(sub)mk('text',{x:x+w-10,y:y+18,'font-size':11,fill:'var(--mute)','text-anchor':'end'},g,sub);return r}
 function arrow(g,d,lbl,lx,ly){const p=mk('path',{d,fill:'none',stroke:'var(--line)','stroke-width':3,'marker-end':'url(#ah)'},g);
@@ -671,8 +700,62 @@ function buildDiagram(set){
  E.aOp=arrow(svg,'M620,250 L658,250','packet',639,240);
  E.aOut=arrow(svg,'M810,250 L833,250','',0,0);
  D.wrap=wrap;D.lat=lat;
+ if(set!=='baseline')bufferInit(D);
  if(m.m){D.mx={M:+m.m,N:+m.n,K:+m.k,cv:document.createElement('canvas'),upto:-1};D.mx.cv.className='mx';wrap.appendChild(D.mx.cv);mxInit(D)}
  return D}
+// RAM contents, not the full matrices below: replay only recorded write edges.
+// Full snapshots are deliberately not stored per cycle (large waves exceed 100k cycles).
+function bufferInit(D){
+ const host=document.createElement('div');host.className='buffer-panels';D.wrap.appendChild(host);
+ if(!D.ev.buffers){host.textContent='Buffer contents not recorded — regenerate this HTML with the updated exporter.';return}
+ D.cacheView={upto:-1,a:{map:new Map(),next:0},b:{map:new Map(),next:0}};
+ for(const kind of ['a','b']){
+  const trace=D.ev.buffers[kind];if(!trace.depth)continue;
+  const panel=document.createElement('section');panel.className='reuse-buffer';
+  panel.innerHTML=`<h3>${kind.toUpperCase()} reuse buffer · 저장된 값</h3><div class="buffer-meta"></div><div class="buffer-scope"></div>
+   <div class="buffer-tools"><button class="btn" type="button" data-prev>◀ entry</button><button class="btn" type="button" data-next>entry ▶</button>
+   <label><input type="checkbox" checked>현재 접근 따라가기</label><span data-page></span></div>
+   <table class="buffer-table"><thead><tr><th>entry</th><th>원래 위치</th><th>INT8 값 · lane 0→3</th></tr></thead><tbody></tbody></table>`;
+  host.appendChild(panel);const s=D.cacheView[kind];s.panel=panel;s.page=0;s.follow=panel.querySelector('input');
+  const prev=panel.querySelector('[data-prev]'),next=panel.querySelector('[data-next]');
+  prev.onclick=()=>{s.follow.checked=false;s.page=Math.max(0,s.page-1);bufferDraw(D,Math.min(Math.floor(T),D.ev.n-1))};
+  next.onclick=()=>{s.follow.checked=false;s.page=Math.min(Math.ceil(trace.depth/6)-1,s.page+1);bufferDraw(D,Math.min(Math.floor(T),D.ev.n-1))};
+  s.follow.onchange=()=>bufferDraw(D,Math.min(Math.floor(T),D.ev.n-1));
+ }
+ const caption=document.createElement('div');caption.className='buffer-caption';
+ caption.textContent='조회: 파랑 · 채움/valid 갱신: 초록 · 이전 행/그룹: 회색. 미저장과 값 0을 구분합니다. RAM write-enable 파형·완료된 메모리 read·공식 입력으로 재구성한 클록 상승 직전 상태입니다.';
+ host.appendChild(caption);
+}
+function lastBufferEvent(events,c){let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(events[mid][0]<=c)lo=mid+1;else hi=mid}return lo?events[lo-1]:null}
+function bufferDraw(D,c){
+ const V=D.cacheView;if(!V)return;const ev=D.ev,m=ev.m,K=+m.k,M=+m.m,N=+m.n,row=ev.row[c];
+ const group=D.set==='s3_all'&&ev.gs?ev.gs[c]:0;
+ const end=D.set==='s3_all'&&ev.gw&&ev.gw[c]?Math.min(N,group+ev.gw[c]):N;
+ if(c<V.upto)for(const kind of ['a','b']){V[kind].map.clear();V[kind].next=0}
+ for(const kind of ['a','b']){
+  const trace=ev.buffers[kind],s=V[kind];if(!trace.depth)continue;
+  while(s.next<trace.writes.length&&trace.writes[s.next][0]<=c){const e=trace.writes[s.next++];s.map.set(e[1],e)}
+  const read=lastBufferEvent(trace.reads,c),write=lastBufferEvent(trace.writes,c);
+  const recent=read&&(!write||read[0]>=write[0])?read:write;
+  if(s.follow.checked&&recent)s.page=Math.floor(recent[1]/6);
+  const valid=e=>kind==='a'?e[2]===row:e[4]!==null&&e[2]>=group&&e[2]<end&&e[1]===Math.floor((e[2]-group)/4)*K+e[3];
+  let usable=0;for(const e of s.map.values())if(valid(e))usable++;
+  const r=read&&read[0]===c?read[1]:-1,w=write&&write[0]===c?write[1]:-1;
+  s.panel.querySelector('.buffer-meta').textContent=`현재 범위에서 사용 가능 ${usable} / 물리 용량 ${trace.depth} entries · 갱신된 주소 ${s.map.size}개`;
+  s.panel.querySelector('.buffer-scope').textContent=kind==='a'?`현재 A 행 ${row}–${Math.min(M-1,row+3)} · entry=k · 각 word는 같은 k의 4행`:
+   `현재 B 열 ${group}–${end-1} · entry=(그룹 내 열 타일 번호)×K+k · 각 word는 같은 k의 연속 4열`;
+  const first=s.page*6,last=Math.min(trace.depth,first+6);let html='';
+  for(let index=first;index<last;index++){
+   const e=s.map.get(index),ok=e&&valid(e),values=e?(kind==='a'?e[3]:e[4]):null;
+   const loc=e?(kind==='a'?`행 ${e[2]}–${Math.min(M-1,e[2]+3)}, k=${index}`:`k=${e[3]}, 열 ${e[2]}–${Math.min(N-1,e[2]+3)}`):'—';
+   const status=!e?'미저장':values===null?'B 미저장 · valid=0 (zero skip)':!ok?'이전 행/그룹 데이터 · 현재 재사용 불가':kind==='a'?`현재 행 데이터 · zero=${e[4]}`:'현재 그룹 데이터';
+   html+=`<tr class="${!ok?'old ':''}${index===r?'read-entry ':''}${index===w?'write-entry':''}"><td>${index}${index===r?' ◀조회':''}${index===w?' ◀채움':''}</td><td>${loc}</td><td>${values?`<div class="buffer-word">${values.map(v=>`<span>${v}</span>`).join('')}</div>`:'—'}<span class="buffer-status">${status}</span></td></tr>`;
+  }
+  s.panel.querySelector('tbody').innerHTML=html;s.panel.querySelector('[data-page]').textContent=`${first}–${last-1}`;
+  s.panel.querySelector('[data-prev]').disabled=s.page===0;s.panel.querySelector('[data-next]').disabled=last===trace.depth;
+ }
+ V.upto=c;
+}
 function rgb(h){h=h.trim();if(h.startsWith('#')){const x=h.length===4?h.slice(1).split('').map(c=>c+c).join(''):h.slice(1);return[0,2,4].map(i=>parseInt(x.substr(i,2),16))}return[200,200,200]}
 function mxInit(D){const X=D.mx,{M,N,K}=X;
  X.cntA=new Uint16Array(M*K);X.cntB=new Uint16Array(K*N);X.ri=0;
@@ -788,6 +871,7 @@ function update(D,t,prevT){
   `cycle ${c.toLocaleString()} · ${pct}`;
  if(ev.trunc&&c>=ev.end)E.doneT.textContent=`${pct.split(' ')[0]} done`;
  mxDraw(D,t,c);
+ bufferDraw(D,c);
 }
 function buildDiagrams(){
  const box=document.getElementById('diagrams');box.innerHTML='';for(const k in dgs)delete dgs[k];
