@@ -13,6 +13,7 @@ Values are sampled once per clock, just before each rising edge (what the flops 
 import argparse, csv, json
 from pathlib import Path
 from buffer_trace import add_buffer_traces
+from packet_trace import add_packet_traces
 
 ROOT = Path(__file__).resolve().parents[1]
 CTRL_ST = {0: 'IDLE', 1: 'ISSUE', 2: 'RESULT', 3: 'WRITE'}
@@ -265,6 +266,7 @@ def main():
         start = text.index('const P=') + len('const P=')
         payload, _ = json.JSONDecoder().raw_decode(text[start:])
         add_buffer_traces(payload, B)
+        add_packet_traces(payload, B)
         html = TEMPLATE.replace('/*DATA*/null', json.dumps(payload, separators=(',', ':')))
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(html)
@@ -325,6 +327,7 @@ def main():
                                            reads=int(r['a_reads']) + int(r['b_reads']),
                                            mem_bits=total_bits(v)[0], bram=total_bits(v)[1]))
     add_buffer_traces(payload, B)
+    add_packet_traces(payload, B)
     html = TEMPLATE.replace('/*DATA*/null', json.dumps(payload, separators=(',', ':')))
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(html)
@@ -380,6 +383,19 @@ h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute
 .buffer-word span{padding:3px 0;text-align:center;background:var(--grp)}
 .buffer-status{display:block;font-size:12px;color:var(--mute);margin-top:3px}
 .buffer-caption{grid-column:1/-1;font-size:12px;color:var(--mute)}
+.packet-panel{padding:14px;border-top:1px solid var(--line)}
+.packet-panel h3{margin:0 0 6px;font-size:14px}
+.packet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:12px;margin-top:12px}
+.packet-card{min-width:0;border:1px solid var(--line);border-radius:6px;padding:10px}
+.packet-title{display:flex;gap:6px;justify-content:space-between;flex-wrap:wrap;font-size:13px;font-weight:600}
+.packet-location,.packet-detail{font-size:12px;color:var(--mute);margin:5px 0;overflow-wrap:anywhere}
+.packet-lanes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:5px 0 9px}
+.packet-lane{background:var(--grp);padding:5px 2px;text-align:center;font-variant-numeric:tabular-nums}
+.packet-lane strong{display:block;font-size:15px;font-weight:600}.packet-lane small{display:block;font-size:11px;color:var(--mute)}
+.packet-lane.pending{background:transparent;color:var(--mute);outline:1px dashed var(--line);outline-offset:-1px}
+.packet-lane.packet-new{background:var(--busF)}
+.packet-card.packet-active{border-color:var(--hi)}
+.packet-card.packet-ready{border-color:var(--bus)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 24px 10px;font-size:12px;color:var(--mute)}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:5px}
 svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -396,6 +412,7 @@ svg .mono{font-family:ui-monospace,Menlo,monospace}.tag{display:inline-block;fon
  <label style="color:var(--mute);font-size:13px"><input type="checkbox" id="sync" checked> same time scale for all views</label>
  <span class="hint">wheel / pinch = zoom · drag = pan · hover = values · click = pin cursor</span>
 </div>
+<p class="note" id="caseHint"></p>
 <table id="cmp" style="margin-bottom:8px"></table><p class="note" id="note"></p>
 <h2>Additional on-chip memory (default parameters, from the RTL declarations)</h2>
 <table id="memSum"></table>
@@ -429,10 +446,10 @@ Set 3 reorders the loop (group → row tile → col tile in group → kk) so the
 const P=/*DATA*/null;
 for(const k in P.sets)for(const c in P.sets[k].waves){const w=P.sets[k].waves[c];
  for(const p in w.data){const f=w.data[p],o=[];let t=0;for(let i=0;i<f.length;i+=2){t+=f[i];o.push([t,f[i+1]])}w.data[p]=o}}
-const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];return c.startsWith('bench_')&&m?`${m.m}×${m.n}×${m.k} · lat ${m.lat} (realistic)`:c};
+const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];if(c==='inspect_8x8x6')return '관찰용 · A 8×6 × B 6×8';return c.startsWith('bench_')&&m?`${m.m}×${m.n}×${m.k} · lat ${m.lat} (큰 성능 측정용)`:c};
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SETNAMES=Object.fromEntries(P.order.map(k=>[k,P.sets[k].name]));
-let mode='all', kase=P.cases.find(c=>P.order.some(k=>P.sets[k].waves[c]));
+let mode='all', kase=P.defaultCase||P.cases.find(c=>P.order.some(k=>P.sets[k].waves[c]));
 const views={};      // set -> view state
 const ROWH=24, LBLW=170, TOP=26;
 
@@ -448,6 +465,7 @@ function valAt(ch,c){let lo=0,hi=ch.length-1,r=0;while(lo<=hi){const m=(lo+hi)>>
 function rows(set){const out=[];let g=null;for(const s of P.sets[set].signals){if(s.group!==g){out.push({group:s.group});g=s.group}out.push({sig:s})}return out}
 
 function render(){
+ document.getElementById('caseHint').textContent=kase==='inspect_8x8x6'?'관찰용: 출력 타일 2행 × 2열, k=0~5. 첫 4행의 k=2 A 값은 모두 0입니다. 타일이 오른쪽으로 가면 A 재사용, 아래로 가면 B 재사용을 확인하세요. 이 크기는 B가 모두 들어가므로 Set 3도 한 그룹으로 동작합니다.':'';
  const box=document.getElementById('views');box.innerHTML='';
  const sets=mode==='all'?P.order:mode==='s1s2s3'?P.order.filter(k=>k!=='baseline'):[mode];
  for(const set of sets){
@@ -641,7 +659,8 @@ function prepAnim(set){
  ev.reqs=reqs;ev.byRsp=new Map(reqs.filter(o=>o.r!=null).map(o=>[o.r,o]));ev.trunc=!!w.trunc;const cum=a=>{const o=new Int32Array(n);let s=0;for(let c=0;c<n;c++){s+=a[c];o[c]=s}return o};
  ev.cA=cum(ev.memReq.map((x,i)=>x&&!ev.isB[i]?1:0));ev.cB=cum(ev.memReq.map((x,i)=>x&&ev.isB[i]?1:0));
  ev.cOp=cum(ev.op);ev.cOut=cum(ev.out);ev.cARd=cum(ev.aRd);ev.cBRd=cum(ev.bRd);ev.cSkip=cum(ev.skip);
- ev.end=(()=>{for(let c=0;c<n;c++)if(ev.done[c])return c;return n-1})();ev.m=P.metrics[set+'|'+kase];ev.n=n;ev.buffers=w.buffers;return ev}
+ ev.end=(()=>{for(let c=0;c<n;c++)if(ev.done[c])return c;return n-1})();ev.m=P.metrics[set+'|'+kase];ev.n=n;ev.buffers=w.buffers;ev.packets=w.packets;ev.matrices=w.matrices;ev.markers=w.markers;
+ ev.ip=d(L+'ip');ev.memV=d('tb_gemm.dut.mem_req_valid');ev.memR=d('tb_gemm.dut.mem_req_ready');ev.opV=d(L+'op_valid');ev.opR=d(L+'op_ready');return ev}
 function box(g,x,y,w,h,title,sub){const r=mk('rect',{x,y,width:w,height:h,rx:8,fill:'var(--panel)',stroke:'var(--line)','stroke-width':1.5},g);
  mk('text',{x:x+10,y:y+18,'font-size':13,'font-weight':600,fill:'var(--ink)'},g,title);if(sub)mk('text',{x:x+w-10,y:y+18,'font-size':11,fill:'var(--mute)','text-anchor':'end'},g,sub);return r}
 function arrow(g,d,lbl,lx,ly){const p=mk('path',{d,fill:'none',stroke:'var(--line)','stroke-width':3,'marker-end':'url(#ah)'},g);
@@ -700,7 +719,7 @@ function buildDiagram(set){
  E.aOp=arrow(svg,'M620,250 L658,250','packet',639,240);
  E.aOut=arrow(svg,'M810,250 L833,250','',0,0);
  D.wrap=wrap;D.lat=lat;
- if(set!=='baseline')bufferInit(D);
+ if(set!=='baseline'){packetInit(D);bufferInit(D)}
  if(m.m){D.mx={M:+m.m,N:+m.n,K:+m.k,cv:document.createElement('canvas'),upto:-1};D.mx.cv.className='mx';wrap.appendChild(D.mx.cv);mxInit(D)}
  return D}
 // RAM contents, not the full matrices below: replay only recorded write edges.
@@ -756,6 +775,78 @@ function bufferDraw(D,c){
  }
  V.upto=c;
 }
+// Current-packet lanes only: a reset register zero is not a received operand.
+function packetInit(D){
+ const panel=document.createElement('section');panel.className='packet-panel';
+ panel.innerHTML='<h3>Packet buffers · op_a / op_b에 준비된 값</h3><div class="buffer-caption">대기 ≠ 값 0 · 메모리=응답 수신 완료 · 재사용=내부 RAM에서 복사 완료 · 패딩=행렬 밖 0 · 생략=B read 없이 0. 각 칸은 INT8 한 개입니다. 한 경로에서는 한 번에 요청 1개만 처리합니다.</div><div class="packet-grid"></div>';
+ D.wrap.appendChild(panel);const trace=D.ev.packets;
+ if(!trace){panel.querySelector('.packet-grid').textContent='패킷 내용 미기록 — 최신 exporter로 다시 생성해 주세요.';return}
+ D.packetView={upto:-1,next:0,states:Array(trace.count).fill(null),changed:Array.from({length:trace.count},()=>({a:[],b:[]})),cards:[]};
+ if(D.ev.markers){const jumps=document.createElement('div');jumps.className='buffer-tools';
+  for(const [label,cycle] of Object.entries(D.ev.markers)){const b=document.createElement('button');b.className='btn';b.type='button';b.textContent=label+' · c'+cycle;
+   b.onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';const prev=T;T=cycle;paint(T,prev)};jumps.appendChild(b)}
+  panel.insertBefore(jumps,panel.querySelector('.packet-grid'))}
+ const grid=panel.querySelector('.packet-grid');
+ for(let i=0;i<trace.count;i++){const card=document.createElement('div');card.className='packet-card';grid.appendChild(card);D.packetView.cards.push(card)}
+ const note=document.createElement('div');note.className='buffer-caption';note.style.marginTop='8px';
+ note.textContent='클록 상승 직전 상태. 요청 수락·응답 완료·내부 RAM 이력과 공식 입력으로 현재 패킷의 유효한 값만 재구성합니다. 빈 슬롯의 이전 물리 비트는 표시하지 않습니다. 초록 칸=직전 클록에서 새로 준비된 값.';panel.appendChild(note);
+}
+function packetReplay(D,c){
+ const V=D.packetView,trace=D.ev.packets;if(!V||!trace)return;
+ if(c===V.upto)return;
+ if(c<V.upto){V.next=0;V.states.fill(null)}
+ V.changed=Array.from({length:trace.count},()=>({a:[],b:[]}));
+ let j=V.next;
+ for(;j<trace.events.length&&trace.events[j][0]<=c;j++){
+  const [at,i,op,...args]=trace.events[j];
+  if(op===0){V.states[i]=null;continue}
+  if(op===1){const [row,col,k,prepared]=args,m=D.ev.m;
+   V.states[i]={row,col,k,first:+(k===0),last:+(k===+m.k-1),prepared:!!prepared,pending:null,
+    a:Array.from({length:trace.rows},(_,l)=>row+l<+m.m?null:0),b:Array.from({length:trace.cols},(_,l)=>col+l<+m.n?null:0),
+    as:Array.from({length:trace.rows},(_,l)=>row+l<+m.m?null:'p'),bs:Array.from({length:trace.cols},(_,l)=>col+l<+m.n?null:'p')};continue}
+  const p=V.states[i];
+  if(op===2){const [a,b,skip]=args;
+   for(const k of ['a','b']){const word=k==='a'?a:b;if(word!==null){p[k]=word.slice();p[k+'s']=p[k+'s'].map(s=>s==='p'?'p':'r');if(at===c)V.changed[i][k]=word.map((_,l)=>l)}}
+   if(skip){p.b.fill(0);p.bs=p.bs.map(s=>s==='p'?'p':'z');if(at===c)V.changed[i].b=p.b.map((_,l)=>l)}
+   p.prepared=true;
+  }else{const [isB,lane,value]=args,k=isB?'b':'a';
+   if(op===3)p.pending=[k,lane];
+   if(op===4){p[k][lane]=value;p[k+'s'][lane]='m';p.pending=null;if(at===c)V.changed[i][k].push(lane)}
+  }
+ }
+ V.next=j;V.upto=c;
+}
+function packetStatus(D,i,c){
+ const ev=D.ev,p=D.packetView&&D.packetView.states[i];
+ const result=(short,label,kind='idle')=>({short,label,kind});
+ if(!p)return result('empty','비어 있음');
+ const dataReady=p.prepared&&p.a.concat(p.b).every(x=>x!==null);
+ const ready=D.set==='s1_all'?!!((ev.full[c]>>i)&1):dataReady;
+ if(ready){if(ev.rd[c]===i)return ev.opR[c]?result('to MAC','전송 가능 · 이번 클록에서 MAC 수락','ready'):result('MAC wait','값 준비 완료 · MAC ready 대기','ready');
+  return result('queued','값 준비 완료 · 앞 패킷 전송 대기','ready')}
+ if(!p.prepared)return result('RAM prep','내부 RAM 조회·준비 단계','prep');
+ if(p.pending){const [kind,lane]=p.pending;return result(ev.memRsp[c]?'rsp '+kind.toUpperCase():'wait rsp',`${kind.toUpperCase()} lane ${lane} · ${ev.memRsp[c]?'응답 도착, 이번 클록에서 저장':'외부 메모리 응답 대기'}`,'active')}
+ const owner=D.set==='s1_all'?ev.wr[c]===i&&ev.lst[c]!==0:ev.ip[c]===i;
+ if(owner&&ev.memV[c]){const k=ev.isB[c]?'B':'A';return result('req '+k,`${k} 외부 읽기 요청 · ${ev.memR[c]?'이번 클록 수락':'메모리 ready 대기'}`,'active')}
+ if(dataReady)return result('finalize','값 준비 완료 · 완료 처리 중','prep');
+ if(owner&&D.set==='s1_all')return result('advance','로더 FSM 진행 · 다음 lane 확인','prep');
+ return result('wait turn','외부 읽기 차례 대기');
+}
+function packetDraw(D,c){
+ const V=D.packetView;if(!V)return;packetReplay(D,c);
+ const names={m:'메모리',r:'재사용',p:'패딩',z:'생략'};
+ V.cards.forEach((card,i)=>{const p=V.states[i],status=packetStatus(D,i,c);
+  card.className='packet-card'+(status.kind==='active'?' packet-active':status.kind==='ready'?' packet-ready':'');
+  let html=`<div class="packet-title"><span>slot ${i}</span><span>${status.label}</span></div>`;
+  if(!p){card.innerHTML=html+'<div class="packet-location">현재 패킷 없음 · A/B 대기</div>';return}
+  html+=`<div class="packet-location">C 타일 시작 (행 ${p.row}, 열 ${p.col}) · k=${p.k} · first=${p.first}, last=${p.last}</div>`;
+  for(const k of ['a','b']){const values=p[k],sources=p[k+'s'],known=values.filter(x=>x!==null).length;
+   html+=`<div class="packet-detail">op_${k} · 준비 ${known}/${values.length} lanes</div><div class="packet-lanes" style="grid-template-columns:repeat(${values.length},minmax(0,1fr))">`;
+   values.forEach((v,j)=>{html+=`<div class="packet-lane ${v===null?'pending':V.changed[i][k].includes(j)?'packet-new':''}"><small>lane ${j}</small><strong>${v===null?'대기':v}</strong><small>${v===null?'미수신':names[sources[j]]}</small></div>`});html+='</div>';
+  }
+  card.innerHTML=html;
+ });
+}
 function rgb(h){h=h.trim();if(h.startsWith('#')){const x=h.length===4?h.slice(1).split('').map(c=>c+c).join(''):h.slice(1);return[0,2,4].map(i=>parseInt(x.substr(i,2),16))}return[200,200,200]}
 function mxInit(D){const X=D.mx,{M,N,K}=X;
  X.cntA=new Uint16Array(M*K);X.cntB=new Uint16Array(K*N);X.ri=0;
@@ -763,7 +854,7 @@ function mxInit(D){const X=D.mx,{M,N,K}=X;
  const off=(w,h)=>{const o=document.createElement('canvas');o.width=w;o.height=h;return o};
  X.oA=off(K,M);X.oB=off(N,K);X.oC=off(N,M);
  // layout in CSS px: A | × | B | = | C   (rows of A/C = M, rows of B = K)
- const W=1000,H=320;const gap=46,top=34,bot=26;
+ const W=1000,H=320;const gap=46,top=D.ev.matrices?52:34,bot=26;
  X.s=Math.min(28,(W-40-2*gap)/(K+2*N),(H-top-bot)/Math.max(M,K));
  const s=X.s,used=s*(K+2*N)+2*gap;let x=(W-used)/2;
  X.A={x,y:top,w:K*s,h:M*s};x+=K*s+gap;X.B={x,y:top,w:N*s,h:K*s};x+=N*s+gap;X.C={x,y:top,w:N*s,h:M*s};
@@ -791,7 +882,8 @@ function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=P.se
  for(const r of [X.A,X.B,X.C]){g.strokeStyle=css('--line');g.lineWidth=1;g.strokeRect(r.x,r.y,r.w,r.h)}
  // labels
  g.font='600 12px -apple-system,sans-serif';g.fillStyle=ink;g.textBaseline='alphabetic';
- g.fillText(`A  (${M}×${K})`,X.A.x,X.A.y-8);g.fillText(`B  (${K}×${N})`,X.B.x,X.B.y-8);g.fillText(`C  (${M}×${N})`,X.C.x,X.C.y-8);
+ const titleOffset=ev.matrices?26:8;
+ g.fillText(`A  (${M}×${K})`,X.A.x,X.A.y-titleOffset);g.fillText(`B  (${K}×${N})`,X.B.x,X.B.y-titleOffset);g.fillText(`C  (${M}×${N})`,X.C.x,X.C.y-titleOffset);
  g.font='20px -apple-system,sans-serif';g.fillStyle=mute;const my=X.A.y+Math.min(X.A.h,X.B.h)/2+7;
  g.fillText('×',X.A.x+X.A.w+16,my);g.fillText('=',X.B.x+X.B.w+16,my);
  // A reuse buffer / B reuse buffer regions (dashed)
@@ -809,6 +901,15 @@ function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=P.se
   g.strokeRect(X.A.x+kk*s,X.A.y+row*s,Math.max(s,2),rr*s);g.strokeRect(X.B.x+col*s,X.B.y+kk*s,cc*s,Math.max(s,2));
   g.strokeRect(X.C.x+col*s,X.C.y+row*s,cc*s,rr*s);g.globalAlpha=.25;g.fillStyle=ink;
   g.fillRect(X.A.x,X.A.y+row*s,K*s,rr*s);g.fillRect(X.B.x+col*s,X.B.y,cc*s,K*s);g.globalAlpha=1}
+ // Small teaching fixture: input numbers and only already-written C values.
+ if(ev.matrices&&s>=20){g.font='12px ui-monospace,Menlo,monospace';g.textAlign='center';g.textBaseline='middle';g.fillStyle=ink;
+  for(const [kind,r,w,h] of [['a',X.A,K,M],['b',X.B,N,K],['c',X.C,N,M]]){
+   for(let j=0;j<w;j++)g.fillText(j,r.x+(j+.5)*s,r.y-10);
+   for(let i=0;i<h;i++){g.fillText(i,r.x-10,r.y+(i+.5)*s);
+    for(let j=0;j<w;j++){const at=i*w+j;g.fillText(kind==='c'&&wc[at]>c?'·':ev.matrices[kind][at],r.x+(j+.5)*s,r.y+(i+.5)*s)}}
+  }
+  g.textAlign='left';g.textBaseline='alphabetic';
+ }
  // requests in flight: exact elements
  for(const o of inFlight(ev,c)){
   const r=o.b?X.B:X.A,w=o.b?N:K,ri=Math.floor(o.a/w),ci=o.a%w,z=Math.max(s,3);
@@ -843,14 +944,12 @@ function update(D,t,prevT){
   mk('circle',{cx:690+fr*265,cy:72+(i%3)*13,r:5,fill:o.b?COL.B:COL.A},E.memG)});
  E.memT.textContent=`outstanding ${inf.length}   reads A ${ev.cA[c]}  B ${ev.cB[c]}`;
  // slots
+ packetDraw(D,c);
  const S=E.slots;S.forEach((s,i)=>{let state='empty',fill='var(--grp)',mark='';
   if(D.set==='baseline'){const l=ev.lst[c];if(l===5){state='ready';fill=COL.op}else if(l>=1){state=l<=2?'loading A':'loading B';fill=l<=2?COL.A:COL.B}}
-  else if(D.set==='s1_all'){const full=(ev.full[c]>>i)&1,l=ev.lst[c];
-   if(full){state='ready';fill=COL.op}else if(ev.wr[c]===i&&l!==0){state=l===1?'A from buffer':l<=3?'loading A':'loading B';fill=l<=3?COL.A:COL.B}
-   mark=(ev.wr[c]===i?'wr ':'')+(ev.rd[c]===i?'rd':'')}
-  else{const al=(ev.alloc[c]>>i)&1,pp=(ev.prep[c]>>i)&1;
-   if(al){if(ev.rd[c]===i&&ev.op[c]){state='to MAC';fill=COL.op}else if(!pp){state='prep';fill='var(--busF)'}else{state='loading';fill='var(--hiF)'}}
-   mark=ev.rd[c]===i?'rd':''}
+  else{const status=packetStatus(D,i,c);state=status.short;
+   fill=status.kind==='active'?COL.req:status.kind==='ready'?COL.op:status.kind==='prep'?'var(--busF)':'var(--grp)';
+   mark=(D.set==='s1_all'&&ev.wr[c]===i?'wr ':'')+(ev.rd[c]===i?'rd':'')}
   sa(s.r,'fill',fill);s.r.setAttribute('fill-opacity',fill.startsWith('#')?.35:1);s.t2.textContent=state;s.mark.textContent=mark});
  // reuse buffers
  const fl=(el,rd,wr)=>{if(!el)return;sa(el,'stroke',rd?COL.A:wr?COL.B:'var(--line)');el.setAttribute('stroke-width',rd||wr?4:1.5)};
@@ -892,7 +991,7 @@ document.getElementById('scrub').oninput=e=>{const prev=T;T=+e.target.value;pain
 document.getElementById('stepF').onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';const prev=T;T=Math.floor(T)+1;paint(T+.5,T-.5);T+=.5};
 document.getElementById('stepB').onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';T=Math.max(0,Math.floor(T)-1);paint(T+.5,T-.5);T+=.5};
 const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
-let dgCols=+(store.get('dgCols')||2);
+let dgCols=kase==='inspect_8x8x6'?1:+(store.get('dgCols')||2);
 function setCols(k){dgCols=k;store.set('dgCols',k);document.getElementById('diagrams').style.setProperty('--dgcols',Math.max(1,Math.min(k,Object.keys(dgs).length)));
  document.getElementById('dgSize').querySelectorAll('button').forEach(b=>b.className=+b.dataset.k===k?'on':'');
  requestAnimationFrame(()=>paint(T,T-.001))}

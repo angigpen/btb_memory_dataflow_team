@@ -20,7 +20,7 @@ def make_case(path, *, m, n, k, seed=7, sparsity=0.0, pattern='random',
         raise ValueError('Dimensions exceed supported limits')
     if not 0 <= sparsity <= 1 or not 1 <= latency <= 1024 or not 1 <= runs <= 16 or stalls not in (0,1,2) or output_stalls not in (0,1,2):
         raise ValueError('Invalid sparsity, latency or runs')
-    if pattern not in ('random','max_positive','max_negative','zeros','identity','zero_boundaries'):
+    if pattern not in ('random','max_positive','max_negative','zeros','identity','zero_boundaries','inspection'):
         raise ValueError('Unknown data pattern')
     rng = random.Random(seed)
     def value(side):
@@ -37,6 +37,11 @@ def make_case(path, *, m, n, k, seed=7, sparsity=0.0, pattern='random',
     if pattern == 'zero_boundaries':
         for row in range(m):
             a[row*k]=0;a[row*k+k-1]=0
+    if pattern == 'inspection':
+        # Small, readable operands; first row tile's k=2 A packet is all zero.
+        # A later row tile needs that B word, exercising the invalid-entry refill.
+        a=[0 if row<4 and t==2 else (row+2*t)%7-3 for row in range(m) for t in range(k)]
+        b=[(2*t+col)%7-3 for t in range(k) for col in range(n)]
     c=matmul(a,b,m,n,k)
     assert all(-(1<<31) <= x < (1<<31) for x in c)
     path=Path(path); path.mkdir(parents=True, exist_ok=True)

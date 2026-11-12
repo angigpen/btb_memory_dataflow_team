@@ -11,6 +11,29 @@ new Function(script); // Parse every viewer function, not only the test subset.
 const jsonStart = script.indexOf('const P=') + 'const P='.length;
 const jsonEnd = script.indexOf(';\nfor(const k in P.sets)', jsonStart);
 const payload = JSON.parse(script.slice(jsonStart, jsonEnd));
+assert.equal(payload.defaultCase, 'inspect_8x8x6');
+assert.equal(payload.cases[0], payload.defaultCase);
+for (const [variant, spec] of Object.entries(payload.sets)) {
+  const demo = spec.waves[payload.defaultCase], m = demo.matrices;
+  assert.equal(demo.trunc, false, 'Small demo must include the complete computation');
+  assert.deepEqual([m.a.length, m.b.length, m.c.length], [48, 48, 64]);
+  assert(m.a.concat(m.b).every(x => x >= -3 && x <= 3));
+  for (let row = 0; row < 4; row++) assert.equal(m.a[row * 6 + 2], 0);
+  assert(m.a.slice(24).some((x, i) => i % 6 === 2 && x !== 0));
+  for (let row = 0; row < 8; row++) for (let col = 0; col < 8; col++) {
+    let sum = 0;
+    for (let k = 0; k < 6; k++) sum += m.a[row * 6 + k] * m.b[k * 8 + col];
+    assert.equal(m.c[row * 8 + col], sum, 'Small matrix output must equal exact integer GEMM');
+  }
+  const metrics = payload.metrics[variant + '|' + payload.defaultCase];
+  if (variant === 'baseline') assert.deepEqual([+metrics.a_reads, +metrics.b_reads], [96, 96]);
+  if (variant === 's2_all' || variant === 's3_all') {
+    assert.deepEqual([+metrics.a_reads, +metrics.b_reads], [48, 48]);
+    for (const marker of ['A 재사용', 'B 재사용', 'B zero skip', 'B 미저장분 재읽기']) {
+      assert(Number.isInteger(demo.markers[marker]), marker);
+    }
+  }
+}
 const helpers = script.slice(script.indexOf('function lastBufferEvent('), script.indexOf('function rgb('));
 const context = {};
 vm.createContext(context);
@@ -50,9 +73,78 @@ for (const [variant, spec] of Object.entries(payload.sets)) {
         row: dense(wave, 'tb_gemm.dut.control.row'),
         gs: dense(wave, 'tb_gemm.dut.control.grp_start'),
         gw: dense(wave, 'tb_gemm.dut.control.gw'),
+        packets: wave.packets,
+        full: dense(wave, 'tb_gemm.dut.loader.full'),
+        alloc: dense(wave, 'tb_gemm.dut.loader.alloc'),
+        prep: dense(wave, 'tb_gemm.dut.loader.prep'),
+        rd: dense(wave, 'tb_gemm.dut.loader.rd'),
+        wr: dense(wave, 'tb_gemm.dut.loader.wr'),
+        ip: dense(wave, 'tb_gemm.dut.loader.ip'),
+        lst: dense(wave, 'tb_gemm.dut.loader.state'),
+        memV: dense(wave, 'tb_gemm.dut.mem_req_valid'),
+        memR: dense(wave, 'tb_gemm.dut.mem_req_ready'),
+        memRsp: dense(wave, 'tb_gemm.dut.mem_rsp_valid'),
+        isB: dense(wave, 'tb_gemm.dut.mem_req_is_b'),
+        opV: dense(wave, 'tb_gemm.dut.loader.op_valid'),
+        opR: dense(wave, 'tb_gemm.dut.loader.op_ready'),
       },
       cacheView: {upto: -1, a: viewState(), b: viewState()},
     };
+    const packets = wave.packets;
+    assert(packets, 'Every optimized waveform must contain packet lane events');
+    D.packetView = {
+      upto: -1, next: 0, states: Array(packets.count).fill(null),
+      changed: Array.from({length: packets.count}, () => ({a: [], b: []})),
+      cards: Array.from({length: packets.count}, () => ({})),
+    };
+    const packetSnapshots = new Map();
+    for (let c = 0; c < wave.n; c++) {
+      context.packetReplay(D, c);
+      let pending = 0, active = 0;
+      for (let i = 0; i < packets.count; i++) {
+        const p = D.packetView.states[i];
+        const status = context.packetStatus(D, i, c);
+        assert.notEqual(status.short, 'loading');
+        if (status.kind === 'active') active++;
+        if (variant !== 's1_all') {
+          assert.equal(!!p, !!((D.ev.alloc[c] >> i) & 1), `${variant}/${caseName} cycle ${c} allocation`);
+          if (p) assert.equal(!!p.prepared, !!((D.ev.prep[c] >> i) & 1));
+        }
+        if (!p) { assert.equal(status.short, 'empty'); continue; }
+        if (p.pending) pending++;
+        const ready = p.prepared && p.a.concat(p.b).every(x => x !== null);
+        if (variant === 's1_all' && ((D.ev.full[c] >> i) & 1)) assert(ready);
+        if (i === D.ev.rd[c] && D.ev.opV[c]) assert(ready, 'MAC must never see an incomplete operand');
+        if (variant !== 's1_all' && i === D.ev.rd[c]) assert.equal(!!ready, !!D.ev.opV[c]);
+        for (const k of ['a', 'b']) p[k].forEach((value, lane) => {
+          assert.equal(value === null, p[k + 's'][lane] === null);
+          if (value !== null) assert(value >= -128 && value <= 127);
+          if (p[k + 's'][lane] === 'p' || p[k + 's'][lane] === 'z') assert.equal(value, 0);
+        });
+      }
+      assert(pending <= 1, 'Only one outstanding memory read');
+      assert(active <= 1, 'Never show several external readers at once');
+      if (c % Math.max(1, Math.floor(wave.n / 30)) === 0 || c === wave.n - 1) {
+        context.packetDraw(D, c);
+        for (const card of D.packetView.cards) {
+          assert(!card.innerHTML.includes('undefined'));
+          assert(!card.innerHTML.includes('null'));
+        }
+        packetSnapshots.set(c, JSON.stringify(D.packetView.states));
+      }
+    }
+    for (const [c, expected] of [...packetSnapshots].reverse()) {
+      context.packetDraw(D, c);
+      assert.equal(JSON.stringify(D.packetView.states), expected, 'Backward scrubbing must restore per-slot lanes');
+    }
+    for (const e of packets.events.filter(e => e[2] === 4).slice(0, 16)) {
+      const [at, slot, , isB, lane, value] = e, k = isB ? 'b' : 'a';
+      context.packetReplay(D, at - 1);
+      assert.equal(D.packetView.states[slot][k][lane], null, 'An arriving byte must remain pending before its write edge');
+      context.packetReplay(D, at);
+      assert.equal(D.packetView.states[slot][k][lane], value);
+      assert.equal(D.packetView.states[slot][k + 's'][lane], 'm');
+    }
     context.bufferDraw(D, 0);
     assert.equal(D.cacheView.a.map.size, 0);
     assert.equal(D.cacheView.b.map.size, 0);
@@ -88,5 +180,5 @@ for (const [variant, spec] of Object.entries(payload.sets)) {
     tested++;
   }
 }
-assert.equal(tested, 12);
-console.log(`PASS: ${tested} waveform cases, RAM write timing, signed data, backward scrub, and entry pagination`);
+assert.equal(tested, payload.cases.length * (payload.order.length - 1));
+console.log(`PASS: ${tested} waveform cases, packet lanes on every cycle, one external reader, RAM/response timing, signed data, backward scrub, and entry pagination`);

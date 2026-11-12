@@ -1,0 +1,2 @@
+run,m,n,k,pe_rows,pe_cols,cycles,mac_cycles,mac_slots,nonzero_mac_slots,a_reads,b_reads,request_stall,response_stall,operand_wait,compute_stall,output_stall
+0,8,8,6,4,4,569,24,384,253,48,48,0,288,469,0,0
