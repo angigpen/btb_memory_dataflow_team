@@ -385,6 +385,9 @@ h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute
 .buffer-caption{grid-column:1/-1;font-size:12px;color:var(--mute)}
 .packet-panel{padding:14px;border-top:1px solid var(--line)}
 .packet-panel h3{margin:0 0 6px;font-size:14px}
+.group-panel{padding:14px;border-top:1px solid var(--line)}
+.group-panel h3{margin:0 0 6px;font-size:14px}
+.group-panel .seg{flex-wrap:wrap}
 .packet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:12px;margin-top:12px}
 .packet-card{min-width:0;border:1px solid var(--line);border-radius:6px;padding:10px}
 .packet-title{display:flex;gap:6px;justify-content:space-between;flex-wrap:wrap;font-size:13px;font-weight:600}
@@ -446,7 +449,9 @@ Set 3 reorders the loop (group → row tile → col tile in group → kk) so the
 const P=/*DATA*/null;
 for(const k in P.sets)for(const c in P.sets[k].waves){const w=P.sets[k].waves[c];
  for(const p in w.data){const f=w.data[p],o=[];let t=0;for(let i=0;i<f.length;i+=2){t+=f[i];o.push([t,f[i+1]])}w.data[p]=o}}
-const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];if(c==='inspect_8x8x6')return '관찰용 · A 8×6 × B 6×8';return c.startsWith('bench_')&&m?`${m.m}×${m.n}×${m.k} · lat ${m.lat} (큰 성능 측정용)`:c};
+const GROUP_CASE='inspect_set3_groups';
+const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];if(c===GROUP_CASE)return 'B 그룹 덮어쓰기 · 작은 예제';if(c==='inspect_8x8x6')return '관찰용 · A 8×6 × B 6×8';return c.startsWith('bench_')&&m?`${m.m}×${m.n}×${m.k} · lat ${m.lat} (큰 성능 측정용)`:c};
+const caseTitle=(set,w)=>set==='s3_all'&&w?.params?.BBUF_DEPTH?`Set 3 — B 그룹 재사용 · 예제 버퍼 ${4*w.params.BBUF_DEPTH} B`:P.sets[set].title;
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SETNAMES=Object.fromEntries(P.order.map(k=>[k,P.sets[k].name]));
 let mode='all', kase=P.defaultCase||P.cases.find(c=>P.order.some(k=>P.sets[k].waves[c]));
@@ -455,8 +460,7 @@ const ROWH=24, LBLW=170, TOP=26;
 
 function seg(el,items,get,set){el.innerHTML='';for(const [k,l] of items){const b=document.createElement('button');b.textContent=l;
  b.className=get()===k?'on':'';b.onclick=()=>{set(k);seg(el,items,get,set);render()};el.appendChild(b)}}
-seg(document.getElementById('setSeg'),[['all','All'],['s1s2s3','Sets 1–3'],...P.order.map(k=>[k,SETNAMES[k]])],()=>mode,v=>{mode=v;for(const k in views)views[k].fit=true});
-seg(document.getElementById('caseSeg'),P.cases.map(c=>[c,caseLabel(c)]),()=>kase,v=>{kase=v;for(const k in views)views[k].fit=true});
+seg(document.getElementById('setSeg'),[['all','All'],['s1s2s3','Sets 1–3'],...P.order.map(k=>[k,SETNAMES[k]])],()=>mode,v=>{mode=v;if(mode!=='s3_all'&&kase===GROUP_CASE)kase=P.defaultCase;for(const k in views)views[k].fit=true});
 
 function fmt(s,v){if(v===null||v===undefined)return'x';if(s.kind==='enum')return(s.enum&&s.enum[v])||String(v);
  if(s.kind==='hex')return'0x'+v.toString(16);if(s.kind==='bin'){const w=s.label==='full'?2:s.label==='ip'?2:4;return v.toString(2).padStart(w,'0')}return String(v)}
@@ -465,13 +469,14 @@ function valAt(ch,c){let lo=0,hi=ch.length-1,r=0;while(lo<=hi){const m=(lo+hi)>>
 function rows(set){const out=[];let g=null;for(const s of P.sets[set].signals){if(s.group!==g){out.push({group:s.group});g=s.group}out.push({sig:s})}return out}
 
 function render(){
- document.getElementById('caseHint').textContent=kase==='inspect_8x8x6'?'관찰용: 출력 타일 2행 × 2열, k=0~5. 첫 4행의 k=2 A 값은 모두 0입니다. 타일이 오른쪽으로 가면 A 재사용, 아래로 가면 B 재사용을 확인하세요. 이 크기는 B가 모두 들어가므로 Set 3도 한 그룹으로 동작합니다.':'';
+ seg(document.getElementById('caseSeg'),P.cases.filter(c=>c!==GROUP_CASE||mode==='s3_all').map(c=>[c,caseLabel(c)]),()=>kase,v=>{kase=v;for(const k in views)views[k].fit=true});
+ document.getElementById('caseHint').textContent=kase===GROUP_CASE?'A 8×2 × B 2×16 → C 8×16. 관찰용 버퍼는 16 B라서 B 전체 32 B를 두 묶음으로 나눠 읽습니다. 실제 Set 3의 4 KB 구성은 큰 성능 측정용 예제에서 확인할 수 있습니다.':kase==='inspect_8x8x6'?'관찰용: 출력 타일 2행 × 2열, k=0~5. 첫 4행의 k=2 A 값은 모두 0입니다. 타일이 오른쪽으로 가면 A 재사용, 아래로 가면 B 재사용을 확인하세요. 이 크기는 B가 모두 들어가므로 Set 3도 한 그룹으로 동작합니다.':'';
  const box=document.getElementById('views');box.innerHTML='';
  const sets=mode==='all'?P.order:mode==='s1s2s3'?P.order.filter(k=>k!=='baseline'):[mode];
  for(const set of sets){
   const w=P.sets[set].waves[kase];const d=document.createElement('div');d.className='view';
   const m=P.metrics[set+'|'+kase];
-  d.innerHTML=`<div class="vtitle">${P.sets[set].title}<span>${w?(w.trunc?`first ${w.n.toLocaleString()} cycles only — run finishes at cycle ${m?(+m.cycles).toLocaleString():'?'}`:w.n.toLocaleString()+' cycles shown'):'no waveform for this case'}${m?` · M×N×K = ${m.m}×${m.n}×${m.k}, mem latency ${m.lat}`:''}</span></div>`;
+  d.innerHTML=`<div class="vtitle">${caseTitle(set,w)}<span>${w?(w.trunc?`first ${w.n.toLocaleString()} cycles only — run finishes at cycle ${m?(+m.cycles).toLocaleString():'?'}`:w.n.toLocaleString()+' cycles shown'):'no waveform for this case'}${m?` · M×N×K = ${m.m}×${m.n}×${m.k}, mem latency ${m.lat}`:''}</span></div>`;
   box.appendChild(d);if(!w)continue;
   const cv=document.createElement('canvas');d.appendChild(cv);
   const v=views[set]||(views[set]={x0:0,ppc:8,fit:true,hover:null,pin:null});
@@ -569,7 +574,7 @@ function stats(){
  let h='<tr><th>variant</th><th>case</th><th>cycles</th><th>speedup</th><th>A reads</th><th>B reads</th><th>total reads</th><th>vs baseline</th><th>operand wait</th></tr>';
  const ms=P.order.map(v=>[v,P.metrics[v+'|'+kase]]).filter(x=>x[1]);const best=Math.min(...ms.map(x=>+x[1].cycles));
  for(const [v,m] of ms){const rd=(+m.a_reads)+(+m.b_reads),brd=b?(+b.a_reads)+(+b.b_reads):0;
-  h+=`<tr><td>${SETNAMES[v]}</td><td>${v==='baseline'?`${kase} (${m.m}×${m.n}×${m.k}, lat ${m.lat})`:''}</td><td class="${+m.cycles===best?'best':''}">${num(m.cycles)}</td>
+  h+=`<tr><td>${SETNAMES[v]}</td><td>${kase===GROUP_CASE||v==='baseline'?`${kase===GROUP_CASE?caseLabel(kase):kase} (${m.m}×${m.n}×${m.k}, lat ${m.lat})`:''}</td><td class="${+m.cycles===best?'best':''}">${num(m.cycles)}</td>
    <td>${b?(b.cycles/m.cycles).toFixed(2)+'×':''}</td><td>${num(m.a_reads)}</td><td>${num(m.b_reads)}</td><td>${num(rd)}</td>
    <td>${b&&v!=='baseline'?((rd/brd-1)*100).toFixed(1)+'%':''}</td><td>${num(m.operand_wait)}</td></tr>`}
  document.getElementById('cmp').innerHTML=h;
@@ -577,7 +582,7 @@ function stats(){
  const w3=P.sets.s3_all.waves[kase];let setup=null;
  if(w3){const st=w3.data['tb_gemm.dut.control.state'];const i=st.findIndex(e=>e[1]===4);if(i>=0&&i+1<st.length)setup=st[i+1][0]-st[i][0]}
  const diff=m&&m2?(+m.cycles)-(+m2.cycles):null;
- document.getElementById('note').textContent=m&&+m.m>4?
+ document.getElementById('note').textContent=kase===GROUP_CASE?'관찰용 RTL 실행 결과입니다. 버퍼 크기는 이 예제에서만 축소했고, 아래 자원 표는 실제 Set 3 기본값을 표시합니다.':m&&+m.m>4?
   `What to watch: ${+m.m/4} row tiles × ${+m.n/4} col tiles × K=${m.k}. Set 2 fills its 16 KB B reuse buffer during row tile 0 and reads it for every later row tile. Set 3 fills its 4 KB reuse buffer during row tile 0 of each group of G=${Math.max(1,Math.min(+m.n/4,Math.floor((P.sets.s3_all.params.BBUF_DEPTH||1024)/+m.k)))} col tiles (the group range in gemm_control), then reuses it for the other row tiles. Baseline and Set 1 are far slower, so only their first cycles are recorded.`:
   m&&+m.m<=4?
   `Note: M=${m.m} fits in one row tile, so Set 3 has nothing to group (B is never reused across row tiles) and runs the same loop as Set 2. `+
@@ -639,7 +644,7 @@ function dense(w,path){const ch=w.data[path];const a=new Int32Array(w.n);if(!ch)
  for(let c=0;c<w.n;c++){while(k+1<ch.length&&ch[k+1][0]<=c)k++;a[c]=ch[k][1]||0}return a}
 function prepAnim(set){
  const w=P.sets[set].waves[kase];if(!w)return null;const L='tb_gemm.dut.loader.',Cp='tb_gemm.dut.control.';const d=p=>dense(w,p);
- const n=w.n,ev={};const and=(a,b)=>a.map((x,i)=>x&&b[i]?1:0);
+ const n=w.n,ev={params:{...P.sets[set].params,...w.params}};const and=(a,b)=>a.map((x,i)=>x&&b[i]?1:0);
  ev.reqIn=and(d(L+'req_valid'),d(L+'req_ready'));ev.memReq=and(d('tb_gemm.dut.mem_req_valid'),d('tb_gemm.dut.mem_req_ready'));
  ev.isB=d('tb_gemm.dut.mem_req_is_b');ev.memRsp=and(d('tb_gemm.dut.mem_rsp_valid'),d('tb_gemm.dut.mem_rsp_ready'));
  ev.op=and(d(L+'op_valid'),d(L+'op_ready'));ev.out=and(d('tb_gemm.dut.out_valid'),d('tb_gemm.dut.out_ready'));
@@ -666,9 +671,9 @@ function box(g,x,y,w,h,title,sub){const r=mk('rect',{x,y,width:w,height:h,rx:8,f
 function arrow(g,d,lbl,lx,ly){const p=mk('path',{d,fill:'none',stroke:'var(--line)','stroke-width':3,'marker-end':'url(#ah)'},g);
  if(lbl)mk('text',{x:lx,y:ly,'font-size':10.5,fill:'var(--mute)','text-anchor':'middle'},g,lbl);const t=mk('circle',{r:6,opacity:0},g);return{p,t,len:null}}
 function buildDiagram(set){
- const ev=prepAnim(set);if(!ev)return null;const pr=P.sets[set].params,m=P.metrics[set+'|'+kase]||{},lat=+m.lat||1;
+ const ev=prepAnim(set);if(!ev)return null;const pr=ev.params,m=P.metrics[set+'|'+kase]||{},lat=+m.lat||1;
  const wrap=document.createElement('div');wrap.className='dg';
- wrap.innerHTML=`<div class="vtitle">${P.sets[set].title}<span id="st_${set}"></span></div>`;
+ wrap.innerHTML=`<div class="vtitle">${caseTitle(set,P.sets[set].waves[kase])}<span id="st_${set}"></span></div>`;
  const svg=mk('svg',{viewBox:'0 0 1000 330'});wrap.appendChild(svg);
  const defs=mk('defs',{},svg);const mkr=mk('marker',{id:'ah',viewBox:'0 0 10 10',refX:8,refY:5,markerWidth:5,markerHeight:5,orient:'auto'},defs);mk('path',{d:'M0,0L10,5L0,10z',fill:'var(--mute)'},mkr);
  const D={ev,set,el:{}};const E=D.el;
@@ -693,7 +698,7 @@ function buildDiagram(set){
   E.acT=mk('text',{x:245,y:176,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'')}
  if(set==='s2_all'||set==='s3_all'){E.bb=mk('rect',{x:425,y:128,width:180,height:62,rx:6,fill:'var(--grp)',stroke:'var(--line)','stroke-width':1.5},svg);
   mk('text',{x:435,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'B reuse buffer');
-  mk('text',{x:595,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.BBUF_DEPTH*4/1024} KB`);
+  mk('text',{x:595,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,pr.BBUF_DEPTH<256?`${pr.BBUF_DEPTH*4} B`:`${pr.BBUF_DEPTH*4/1024} KB`);
   E.bbT=mk('text',{x:435,y:176,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'')}
  if(set==='s2_all'||set==='s3_all'){mk('text',{x:235,y:215,'font-size':11,fill:'var(--mute)'},svg,'memory request (one at a time)');
   E.tags=[mk('rect',{x:235,y:222,width:22,height:18,rx:3,fill:'var(--grp)'},svg)];
@@ -719,7 +724,10 @@ function buildDiagram(set){
  E.aOp=arrow(svg,'M620,250 L658,250','packet',639,240);
  E.aOut=arrow(svg,'M810,250 L833,250','',0,0);
  D.wrap=wrap;D.lat=lat;
- if(set!=='baseline'){packetInit(D);bufferInit(D)}
+ if(set!=='baseline'){
+  if(set==='s3_all')groupInit(D);
+  if(D.groupView){bufferInit(D);packetInit(D)}else{packetInit(D);bufferInit(D)}
+ }
  if(m.m){D.mx={M:+m.m,N:+m.n,K:+m.k,cv:document.createElement('canvas'),upto:-1};D.mx.cv.className='mx';wrap.appendChild(D.mx.cv);mxInit(D)}
  return D}
 // RAM contents, not the full matrices below: replay only recorded write edges.
@@ -746,6 +754,46 @@ function bufferInit(D){
  host.appendChild(caption);
 }
 function lastBufferEvent(events,c){let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(events[mid][0]<=c)lo=mid+1;else hi=mid}return lo?events[lo-1]:null}
+function groupRanges(ev){
+ if(!ev.gs||!ev.buffers?.b.depth)return [];
+ const ranges=[];
+ for(let c=0;c<ev.n;c++){
+  const start=ev.gs[c],width=ev.gw[c];
+  if(width&&ranges.at(-1)?.start!==start)ranges.push({cycle:c,start,end:Math.min(+ev.m.n,start+width)});
+ }
+ for(const [i,g] of ranges.entries()){
+  const next=ranges[i+1]?.cycle??ev.n;
+  g.fill=ev.buffers.b.writes.find(e=>e[0]>=g.cycle&&e[0]<next&&e[4]!==null)?.[0];
+  g.read=ev.buffers.b.reads.find(e=>e[0]>=g.cycle&&e[0]<next)?.[0];
+ }
+ return ranges;
+}
+function seekCycle(c){
+ playing=false;document.getElementById('play').textContent='▶ Play';T=c;paint(T,T-.001);
+}
+function groupInit(D){
+ const ranges=groupRanges(D.ev);if(ranges.length<2)return;
+ const host=document.createElement('section');host.className='group-panel';
+ const bytes=D.ev.buffers.b.depth*4,total=+D.ev.m.n * +D.ev.m.k;
+ host.innerHTML=`<h3>B 그룹 전환 · 같은 버퍼 주소에 덮어쓰기</h3><div class="buffer-caption">B 전체 ${total.toLocaleString()} B · 보관 공간 ${bytes.toLocaleString()} B. 한 묶음의 B를 모든 행 타일에 사용한 뒤 다음 묶음을 같은 주소에 저장합니다.</div><div class="buffer-tools"><div class="seg" data-groups></div><button class="btn" type="button" data-fill></button><button class="btn" type="button" data-read>다음 행의 첫 B 조회</button></div><div class="buffer-caption" data-group-status></div>`;
+ const nav=host.querySelector('[data-groups]');
+ const buttons=ranges.map((g,i)=>{const b=document.createElement('button');b.type='button';b.textContent=`${i+1}묶음 · 열 ${g.start}–${g.end-1}`;b.onclick=()=>seekCycle(g.cycle);nav.appendChild(b);return b});
+ D.groupView={ranges,buttons,fill:host.querySelector('[data-fill]'),read:host.querySelector('[data-read]'),status:host.querySelector('[data-group-status]'),index:-2};
+ D.wrap.appendChild(host);
+}
+function groupDraw(D,c){
+ const V=D.groupView;if(!V)return;
+ const i=V.ranges.findLastIndex(g=>g.cycle<=c),g=V.ranges[Math.max(0,i)];
+ if(V.index!==i){
+  V.buttons.forEach((b,j)=>{b.className=i===j?'on':'';b.setAttribute('aria-pressed',i===j?'true':'false')});
+  V.fill.textContent=i>0?'첫 덮어쓰기':'첫 B 값 저장';V.fill.disabled=g.fill===undefined;V.fill.onclick=()=>seekCycle(g.fill);
+  V.read.disabled=g.read===undefined;V.read.onclick=()=>seekCycle(g.read);V.index=i;
+ }
+ V.status.textContent=i<0?'아직 묶음을 고르기 전입니다.':c>=D.ev.end&&!D.ev.trunc?'계산 완료 · 마지막 묶음의 값이 버퍼에 남아 있습니다.':c<g.fill?
+  (i?'이전 묶음의 값이 버퍼에 남아 있지만, 지금 묶음에는 쓸 수 없습니다.':'첫 묶음의 B를 외부 메모리에서 읽어오는 중입니다.'):
+  D.ev.row[c]===0?`열 ${g.start}–${g.end-1}의 B를 같은 물리 버퍼에 채웁니다.`:
+  `A 행 ${D.ev.row[c]}부터 계산하면서, 열 ${g.start}–${g.end-1}의 B를 버퍼에서 재사용합니다.`;
+}
 function bufferDraw(D,c){
  const V=D.cacheView;if(!V)return;const ev=D.ev,m=ev.m,K=+m.k,M=+m.m,N=+m.n,row=ev.row[c];
  const group=D.set==='s3_all'&&ev.gs?ev.gs[c]:0;
@@ -859,7 +907,7 @@ function mxInit(D){const X=D.mx,{M,N,K}=X;
  const s=X.s,used=s*(K+2*N)+2*gap;let x=(W-used)/2;
  X.A={x,y:top,w:K*s,h:M*s};x+=K*s+gap;X.B={x,y:top,w:N*s,h:K*s};x+=N*s+gap;X.C={x,y:top,w:N*s,h:M*s};
  X.W=W;X.H=top+Math.max(M,K)*s+bot}
-function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=P.sets[D.set].params;
+function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=ev.params;
  // fetch counts up to cycle c (incremental forward, rebuild on rewind)
  if(c<X.upto){X.cntA.fill(0);X.cntB.fill(0);X.ri=0}
  const R=ev.reqs;while(X.ri<R.length&&R[X.ri].q<=c){const o=R[X.ri++];if(o.b){if(o.a<K*N)X.cntB[o.a]++}else if(o.a<M*K)X.cntA[o.a]++}X.upto=c;
@@ -970,13 +1018,14 @@ function update(D,t,prevT){
   `cycle ${c.toLocaleString()} · ${pct}`;
  if(ev.trunc&&c>=ev.end)E.doneT.textContent=`${pct.split(' ')[0]} done`;
  mxDraw(D,t,c);
+ groupDraw(D,c);
  bufferDraw(D,c);
 }
 function buildDiagrams(){
  const box=document.getElementById('diagrams');box.innerHTML='';for(const k in dgs)delete dgs[k];
  const sets=mode==='all'?P.order:mode==='s1s2s3'?P.order.filter(k=>k!=='baseline'):[mode];
  for(const set of sets){const D=buildDiagram(set);if(!D)continue;dgs[set]=D;box.appendChild(D.wrap);
-  const p=document.createElement('p');p.textContent=DESC[set];D.wrap.appendChild(p)}
+  const p=document.createElement('p');p.textContent=kase===GROUP_CASE?'작은 예제에서는 B 버퍼만 16 B로 설정했습니다. 같은 슬롯에 앞 묶음과 뒤 묶음이 차례로 들어가는지 확인할 수 있습니다.':DESC[set];D.wrap.appendChild(p)}
  const mx=Math.max(1,...Object.values(dgs).map(D=>D.ev.end+1));const sc=document.getElementById('scrub');sc.max=mx;
  T=Math.min(T,mx);sc.value=Math.floor(T);paint(T,T-1)}
 function paint(t,prev){for(const k in dgs)update(dgs[k],t,prev);document.getElementById('cycLbl').textContent='cycle '+Math.floor(t);

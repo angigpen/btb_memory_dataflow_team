@@ -13,6 +13,14 @@ const jsonEnd = script.indexOf(';\nfor(const k in P.sets)', jsonStart);
 const payload = JSON.parse(script.slice(jsonStart, jsonEnd));
 assert.equal(payload.defaultCase, 'inspect_8x8x6');
 assert.equal(payload.cases[0], payload.defaultCase);
+const groupCase = 'inspect_set3_groups';
+assert(payload.cases.includes(groupCase));
+assert.deepEqual(payload.order.filter(v => payload.sets[v].waves[groupCase]), ['s3_all']);
+const smallGroup = payload.sets.s3_all.waves[groupCase];
+assert.equal(smallGroup.trunc, false);
+assert.equal(smallGroup.params.BBUF_DEPTH, 4);
+assert.deepEqual([smallGroup.matrices.a.length, smallGroup.matrices.b.length, smallGroup.matrices.c.length], [16, 32, 128]);
+assert.deepEqual(['a_reads', 'b_reads'].map(k => +payload.metrics['s3_all|' + groupCase][k]), [32, 32]);
 for (const [variant, spec] of Object.entries(payload.sets)) {
   const demo = spec.waves[payload.defaultCase], m = demo.matrices;
   assert.equal(demo.trunc, false, 'Small demo must include the complete computation');
@@ -68,6 +76,7 @@ for (const [variant, spec] of Object.entries(payload.sets)) {
     const D = {
       set: variant,
       ev: {
+        n: wave.n,
         m: payload.metrics[variant + '|' + caseName],
         buffers: wave.buffers,
         row: dense(wave, 'tb_gemm.dut.control.row'),
@@ -90,6 +99,32 @@ for (const [variant, spec] of Object.entries(payload.sets)) {
       },
       cacheView: {upto: -1, a: viewState(), b: viewState()},
     };
+    if (variant === 's3_all' && [groupCase, 'bench_64x128x128_l23'].includes(caseName)) {
+      const small = caseName === groupCase;
+      const groups = context.groupRanges(D.ev);
+      const ranges = small ? [[0, 8], [8, 16]] : [[0, 32], [32, 64], [64, 96], [96, 128]];
+      assert.equal(JSON.stringify(groups.map(g => [g.start, g.end])), JSON.stringify(ranges));
+      const B = D.cacheView.b;
+      const depth = small ? 4 : 1024;
+      assert.equal(wave.buffers.b.depth, depth);
+      assert.equal(wave.buffers.b.writes.filter(e => e[4] !== null).length, depth * ranges.length);
+      for (const [i, g] of groups.entries()) {
+        assert(g.cycle < g.fill && g.fill < g.read);
+        context.bufferDraw(D, g.cycle);
+        assert.match(B.nodes['.buffer-meta'].textContent, /사용 가능 0 \/ 물리 용량/);
+        if (i > 0) {
+          assert.equal(B.map.size, depth, 'Physical values survive the group switch');
+          assert.equal(B.map.get(0)[2], groups[i - 1].start, 'Entry 0 still holds the previous group');
+          assert.match(B.nodes.tbody.innerHTML, /현재 재사용 불가/);
+        }
+        context.bufferDraw(D, g.fill);
+        assert.equal(B.map.get(0)[2], g.start, 'The same physical entry is overwritten by the new group');
+        assert.match(B.nodes.tbody.innerHTML, /◀채움/);
+        context.bufferDraw(D, g.read);
+        assert.match(B.nodes['.buffer-meta'].textContent, new RegExp(`사용 가능 ${depth} /`));
+        assert.match(B.nodes.tbody.innerHTML, /◀조회/);
+      }
+    }
     const packets = wave.packets;
     assert(packets, 'Every optimized waveform must contain packet lane events');
     D.packetView = {
@@ -180,5 +215,5 @@ for (const [variant, spec] of Object.entries(payload.sets)) {
     tested++;
   }
 }
-assert.equal(tested, payload.cases.length * (payload.order.length - 1));
-console.log(`PASS: ${tested} waveform cases, packet lanes on every cycle, one external reader, RAM/response timing, signed data, backward scrub, and entry pagination`);
+assert.equal(tested, (payload.cases.length - 1) * (payload.order.length - 1) + 1);
+console.log(`PASS: ${tested} waveform cases, group switches and overwrites, packet lanes on every cycle, one external reader, RAM/response timing, signed data, backward scrub, and entry pagination`);

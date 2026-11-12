@@ -34,8 +34,8 @@ def add_buffer_traces(payload, build):
     for variant, spec in payload['sets'].items():
         if variant == 'baseline':
             continue
-        params = spec['params']
         for case, wave in spec['waves'].items():
+            params = {**spec['params'], **wave.get('params', {})}
             m = payload['metrics'][variant + '|' + case]
             M, N, K = (int(m[k]) for k in ('m', 'n', 'k'))
             rows, cols = params['PE_ROWS'], params['PE_COLS']
