@@ -1,26 +1,27 @@
-# Memory/Dataflow 팀 RTL — operand_loader.v만 수정한 버전
+# Memory/Dataflow 팀 RTL — Set 1~4
 
-배포본 README의 규칙대로 **Memory/Dataflow 팀은 `rtl/operand_loader.v`만 수정**합니다.
-`gemm_control.v`, `gemm_top.v`를 포함한 나머지 5개 파일은 baseline 그대로입니다.
+배포본 README의 규칙상 **Memory/Dataflow 팀 파일은 `rtl/operand_loader.v`** 입니다.
+Set 1·2는 그 파일만 고쳤고, Set 3·4는 다른 파일도 고쳐서 **규칙 밖**입니다(진행자 허락 필요).
+**어느 Set도 zero read skip을 쓰지 않습니다** (모든 packet이 B를 읽거나 buffer에서 가져옴).
 
 ## 폴더 구성
 
 | 폴더 | 내용 |
 |---|---|
-| `set1/operand_loader.v` | **Set 1**: A reuse buffer + zero read skip + Ping/Pong (Phase 1 + 2a) |
-| `set2/operand_loader.v` | **Set 2**: Set 1 + B reuse buffer (Phase 3), packet 슬롯 4개 |
-| `set3/` | **Set 3**: Set 2 loader (B buffer 4 KB) + loop 순서를 바꾼 `gemm_control.v` (규칙 밖, 아래 참고) |
+| `set1/operand_loader.v` | **Set 1**: A reuse buffer + Ping/Pong (Phase 1 + 2a) |
+| `set2/operand_loader.v` | **Set 2**: Set 1 + B reuse buffer 16 KB (Phase 3), packet 슬롯 4개 |
+| `set3/` | **Set 3**: Set 2 loader (B buffer 4 KB) + loop 순서를 바꾼 `gemm_control.v` (규칙 밖) |
+| `set4/` | **Set 4**: Set 3 + `mac_array` ACC 4벌 + B packet 공유 (`gemm_top`, `gemm_control`, `operand_loader`, `mac_array`; 규칙 밖) |
 | `baseline/` | 배포본 RTL 6개 (수정 없음) |
-| `tb/` | 배포본 공식 테스트벤치 (`tb_gemm.sv`, `rv_monitor.sv`, `rv_delay.v`) |
+| `tb/` | 배포본 공식 테스트벤치 (`tb_gemm.sv`, `rv_monitor.sv`, `rv_delay.v`) + 우리가 추가한 `wave_dump.v`, `pkt_trace.v` (공식 tb는 수정 안 함) |
 | `scripts/run_official.py` | 공식 테스트벤치를 **Vivado 대신 Icarus Verilog**로 돌리는 스크립트 |
-| `scripts/summarize_official.py` | baseline 대비 cycle·read 비교 표 |
+| `scripts/summarize_official.py` | baseline 대비 cycle·read 비교 표 (`results/summary.txt`) |
 | `scripts/vcd_to_html.py`, `make_waves.sh` | 발표용 HTML 만들기 (아래) |
-| `tb/wave_dump.v` | 파형 저장용 모듈 (공식 테스트벤치는 수정 안 함) |
-| `results/` | 측정 결과 (`summary.txt`, variant별 `summary.csv`) |
+| `results/` | 측정 결과 (variant별 csv, `summary.txt`) |
 
 ## 공식 flow로 쓰는 법
 
-1. 배포본의 `rtl/operand_loader.v`를 `set1/` 또는 `set2/`의 파일로 바꿉니다.
+1. 배포본의 `rtl/operand_loader.v`를 `set1/` 또는 `set2/`의 파일로 바꿉니다 (Set 3·4는 폴더의 파일 전부).
 2. 실행합니다: `python scripts/run.py --suite --extended --optimized --build build/candidate`
 3. 비교합니다: `python scripts/compare.py build/baseline/results.json build/candidate/results.json`
 
@@ -29,11 +30,16 @@ Vivado가 없으면 Icarus로 같은 테스트벤치를 돌릴 수 있습니다:
 ```
 python scripts/run_official.py --rtl-dir baseline --suite --extended --baseline-checks --build build/baseline
 python scripts/run_official.py --rtl-dir set1 --suite --extended --build build/set1      # +OPTIMIZED
-python scripts/run_official.py --rtl-dir set2 --cases rectangular --param USE_DBUF=0 --build build/x
-python scripts/summarize_official.py build
+python scripts/run_official.py --rtl-dir set2 --extended --cases rectangular --param USE_DBUF=0 --build build/x
+python scripts/run_official.py --rtl-dir set4 --extended --cases bench64 --param top.NBANK=1 --build build/y
+python scripts/summarize_official.py results
 ```
 
-`run_official.py`는 `run.py`와 같은 fixture, 같은 plusarg(`+HOST_TEST`, `restart`에 `+RESET_TEST`, `+OPTIMIZED`), 같은 PASS 조건을 씁니다.
+- `run_official.py`는 `run.py`와 같은 fixture, 같은 plusarg(`+HOST_TEST`, `restart`에 `+RESET_TEST`, `+OPTIMIZED`), 같은 PASS 조건을 씁니다.
+- 폴더에 없는 파일은 `baseline/`에서 가져옵니다.
+- `--param X=1` → operand_loader, `control.X=1` → gemm_control, `top.X=1` → gemm_top (Set 4 설정).
+- 공식 suite + 추가 case: `bench64`(64³), `bench64_lat23`, `bench64_sp90`, `bench_64x128x128`(+`_l23`),
+  `bench_64x64x256`(B = 16 KB), `bench_64x128x512`(B = 64 KB), 그리고 **값이 −3…3인 데모** `demo_8x8x4`, `demo_20x12x6`.
 
 ## loader가 위치를 스스로 알아내는 방법
 
@@ -54,12 +60,11 @@ gemm_control은 tile 하나를 끝까지 마친 뒤 다음 tile을 시작하므�
 
 | parameter | 기본값 | 의미 |
 |---|---|---|
-| `USE_A_REUSE` | 1 | column tile 0에서 A 4 byte + zero flag를 A reuse buffer[kk]에 저장, 다음 column tile부터 buffer에서 읽음 |
-| `USE_ZERO_SKIP` | 1 | buffer의 A가 전부 0이면 B read 생략. packet은 B=0으로 그대로 MAC에 보냄 (first/last 유지) |
+| `USE_A_REUSE` | 1 | column tile 0에서 A 4 byte를 A reuse buffer[kk]에 저장, 다음 column tile부터 buffer에서 읽음 |
 | `USE_DBUF` | 1 | packet 슬롯 2개 (Ping/Pong) |
-| `ACACHE_DEPTH` | 1024 | A reuse buffer entry 수. kk ≥ depth면 A를 메모리에서 읽음 |
+| `ABUF_DEPTH` | 1024 | A reuse buffer entry 수 (× 4 B = 4 KB). kk ≥ depth면 A를 메모리에서 읽음 |
 
-세 switch를 모두 0으로 하면 **baseline과 cycle·read가 완전히 같습니다** (공식 테스트벤치, baseline 공식 검사 모드로 확인).
+두 switch를 모두 0으로 하면 **baseline과 cycle·read가 완전히 같습니다**.
 
 ## Set 2 — 블록 구조 (Request intake → Prep → Load control → Response router → Supply control)
 
@@ -67,85 +72,103 @@ gemm_control은 tile 하나를 끝까지 마친 뒤 다음 tile을 시작하므�
 
 | parameter | 기본값 | 의미 |
 |---|---|---|
-| `USE_A_REUSE`, `USE_ZERO_SKIP` | 1 | Set 1과 같음 |
-| `USE_B_REUSE` | 1 | row tile 0에서 B를 B reuse buffer에 저장, 다음 row tile부터 buffer에서 읽음 |
-| `NSLOTS` | 4 | packet 슬롯 수. 메모리를 안 읽는 packet(두 buffer에서 다 나오는 것)이 앞 packet 뒤에 줄 서서 기다릴 수 있음. 2로 줄이면 64×64에서 44,127 → 51,102 cycle |
-| `ACACHE_DEPTH` | 1024 | A reuse buffer entry |
+| `USE_A_REUSE` | 1 | Set 1과 같음 |
+| `USE_B_REUSE` | 1 | row tile 0에서 B를 B reuse buffer에 저장, 다음 row tile부터 buffer에서 읽음 (B는 한 번만 읽음) |
+| `NSLOTS` | 4 | packet 슬롯 수. 메모리를 안 읽는 packet이 앞 packet 뒤에 줄 서서 기다릴 수 있음 |
+| `ABUF_DEPTH` | 1024 | A reuse buffer entry |
 | `BBUF_DEPTH` | 4096 | B reuse buffer entry × 4 byte = 16 KB = K=N=128일 때 B 전체 |
 
-- B reuse buffer 옆에 1-bit valid RAM이 있습니다. row tile 0에서 zero skip으로 B를 안 읽은 칸은 valid=0입니다. 나중 row tile이 그 B가 필요하면 한 번 읽어서 저장합니다. 그래서 B는 **최대 한 번만** 읽습니다.
-- 파라미터는 `gemm_top`이 넘겨주지 않으므로 `operand_loader.v`의 기본값을 고쳐서 바꿉니다 (`run_official.py --param`은 시뮬레이션용 defparam).
+파라미터는 `gemm_top`이 넘겨주지 않으므로 `operand_loader.v`의 기본값을 고쳐서 바꿉니다.
 
 ## 메모리 계약 (INTERFACES.md, tb_gemm.sv)
 
 - 요청 1개 = 1 byte. **미완료 요청은 최대 1개**입니다.
 - `mem_req_ready = !pending && !rsp_valid`: 처리 중이거나 응답을 아직 안 가져갔으면 0.
 - 그래서 byte 하나에 latency + 2 cycle이 걸립니다. 요청을 여러 개 미리 보내는 방식(2b)은 쓸 수 없어서 코드에서 뺐습니다. 이전 버전(최대 4개)과 cycle 수가 완전히 같은 것을 확인했습니다.
-- 남는 방법은 **read 횟수 자체를 줄이는 것**(A·B reuse, zero skip)입니다.
+- 남는 방법은 **read 횟수 자체를 줄이는 것**(A·B reuse, Set 3·4의 loop 순서)입니다.
 
 ## 측정 결과 (공식 테스트벤치, Icarus)
 
-- baseline: `--suite --extended` 44 case, baseline 공식 검사 포함 **전부 PASS**
-- Set 1, Set 2: 같은 44 case, `+OPTIMIZED` **전부 PASS** (정답·주소·중복·handshake 검사 유지)
-- Set 3: 같은 44 case 전부 PASS
-- variant 비교: 9개 case × 5개 variant 전부 PASS
+baseline, Set 1~4 모두 **49 case 전부 PASS** (공식 suite + extended + 추가 case, 정답·주소·중복·handshake 검사).
+전체 표는 `results/summary.txt`. cycle(배속), latency 1:
 
-| case | variant | cycles | 배속 | 총 read | read 변화 |
+| case | baseline | Set 1 | Set 2 | Set 3 | Set 4 |
 |---|---|---|---|---|---|
-| rectangular (3×7×5) | baseline | 266 | 1.00× | 65 | — |
-| | Set 1 | 213 | 1.25× | 50 | −23.1% |
-| | Set 2 | 192 | 1.39× | 50 | −23.1% |
-| sparse_90 (4×9×13) | Set 1 | 488 | 2.03× | 119 | −56.4% |
-| | Set 2 | 436 | 2.27× | 119 | −56.4% |
-| 64×64×64, latency 1 | baseline | 430,592 | 1.00× | 131,072 | — |
-| | Set 1 | 245,504 | 1.75× | 69,632 | −46.9% |
-| | Set 2 | 44,127 | **9.76×** | 8,192 | −93.8% |
-| 64×64×64, latency 23 | baseline | 3,314,176 | 1.00× | 131,072 | — |
-| | Set 1 | 1,777,408 | 1.86× | 69,632 | −46.9% |
-| | Set 2 | 224,351 | **14.77×** | 8,192 | −93.8% |
-| 64×64×64, 0이 90% | Set 1 | 129,044 | 3.34× | 30,812 | −76.5% |
-| | Set 2 | 43,887 | 9.81× | 8,192 | −93.8% |
-| 64×128×128 | Set 1 | 949,760 | 1.80× | 270,336 | −48.4% |
-| | Set 2 (16 KB) | 143,535 | **11.94×** | 24,576 | −95.3% |
-| | Set 2 (4 KB) | 650,775 | 2.63× | 208,896 | −60.2% |
-| | Set 3 (4 KB, loop 변경) | 211,556 | 8.10× | 49,152 | −90.6% |
-| 64×128×1024 (max) | Set 1 | 7,529,984 | 1.81× | 2,162,688 | −48.4% |
-| | Set 2 (16 KB) | 5,807,571 | 2.35× | 1,916,928 | −54.3% |
-| | Set 3 (4 KB) | 6,314,497 | 2.16× | 2,101,248 | −49.9% |
+| demo 8×8×4 | 488 | 388 (1.26×) | 279 (1.75×) | 281 | **236 (2.07×)** |
+| demo 20×12×6 | 2,610 | 1,875 | 931 | 934 | **716 (3.65×)** |
+| 16×16×64 (dense) | 26,912 | 17,456 | 7,047 | 7,051 | **6,872 (3.92×)** |
+| 64×64×64 | 430,592 | 245,504 (1.75×) | 44,127 (9.76×) | 44,143 | **41,657 (10.34×)** |
+| 64×128×128 | 1,713,152 | 949,760 | **143,535 (11.94×)** | 211,556 | 205,882 |
+| 64×64×256 | 1,708,544 | 967,424 | **161,055 (10.6×)** | 297,040 | 293,606 |
+| 64×128×512 | 6,824,960 | 3,769,856 | 2,571,159 | 1,902,866 | **1,893,400 (3.6×)** |
+| 64×128×1024 (max) | 13,640,704 | 7,529,984 | 5,807,571 | 6,314,497 | **2,118,075 (6.44×)** |
 
-기능별 기여 (64×64×64, latency 1, Set 1 내부): A reuse만 1.65×, Ping/Pong만 1.04×, 0이 90%일 때 zero skip을 더하면 1.65× → 2.97×.
-전체 표는 `results/summary.txt`에 있습니다. cycle 수는 Icarus로 측정한 값이며, 테스트벤치가 같으므로 Vivado xsim에서도 같아야 합니다.
+- zero skip을 뺐으므로 sparse case는 dense와 cycle이 같습니다 (예: `sparse_benchmark` Set 1 11,480 → 17,456).
+- B가 buffer에 다 들어가면 Set 2(16 KB)가 가장 적게 읽습니다. B가 어떤 buffer에도 안 들어가면(K=1024) Set 4의 B 공유가 B read를 1/4로 줄입니다.
+- Set 4 ablation (64×128×128): `NBANK=1` 201,449 / `USE_B_SHARE=0` 341,678 / `USE_B_REUSE=0` 273,334.
 
 ## 발표용 HTML (결과 + 파형 + 애니메이션)
 
-`build/waves.html`을 브라우저로 열면 됩니다. 인터넷 연결 없이도 열리는 파일 하나입니다(약 10 MB).
+`build/waves.html`을 브라우저로 열면 됩니다. 인터넷 없이 열리는 파일 하나입니다(약 14 MB).
 
-다시 만들려면 (Icarus 필요, 약 15분):
+- **case**: demo 8×8×4, demo 20×12×6 (값 표시), rectangular, long_latency, 64×64×64, 64×128×128 (latency 23).
+- **데모 case**: A·B의 모든 값과 C의 부분합(각 PE의 ACC 값)을 숫자로 보여줍니다. mac_array가 방금 받은 packet의
+  A 열·B 행·C tile에 테두리가 쳐지고, 아래 줄에 `C[..] += A[..][k] × B[k][..]`가 실제 값으로 나옵니다. "1 ▶"로 한 cycle씩 진행.
+- **확대·축소**: 그림 크기가 CSS px로 고정되어 있어서 브라우저 확대/축소(Cmd − / Cmd +)를 따라갑니다. 축소하면 한 줄에 더 많이 들어갑니다. `size` 버튼은 그림 하나의 폭(1400/760/540/420 px).
+- 300,000 cycle보다 긴 실행은 처음 300,000 cycle만 저장합니다 (baseline·Set 1의 큰 case는 160,000). 표 숫자는 전체 실행값.
+
+다시 만들려면 (Icarus 필요, 약 45분):
 
 ```
-./make_waves.sh                     # 공식 테스트벤치로 파형 + 64×128×128 buffer 크기 비교를 build/에 생성
+./make_waves.sh                     # 전체 suite + 파형 + buffer 크기 비교 -> build/, results/
 python3 scripts/vcd_to_html.py      # -> build/waves.html
 ```
 
-- 파형: `rectangular`, `sparse_90`, `long_latency`, 64×128×128 (latency 23). baseline과 Set 1의 큰 케이스는 너무 길어서 처음 160,000 cycle만 저장합니다(결과 숫자는 전체 실행값).
-- 파형 저장은 `tb/wave_dump.v`가 합니다. 공식 `tb_gemm.sv`는 고치지 않고 옆에 같이 컴파일합니다 (`run_official.py --vcd`).
-- 표 숫자: `results/*.csv` (전체 suite)와 `build/**/summary.csv` (파형·sweep 실행).
+- 파형은 `tb/wave_dump.v`, packet 값은 `tb/pkt_trace.v`가 저장합니다 (`run_official.py --vcd`).
 
 ## 자원 (Yosys로 추정, Vivado 아님)
 
 | | BRAM | FF | DSP |
 |---|---|---|---|
 | baseline | 0 | 2,041 | 16 |
-| Set 1 | BRAM36 1개 | 2,149 | 16 |
-| Set 2 | BRAM36 5개 + BRAM18 1개 + LUTRAM 일부 | 2,367 | 18 |
-| Set 3 | BRAM36 2개 + LUTRAM 일부 | 2,463 | 18 |
+| Set 1 | BRAM36 1개 (A 4 KB) | 2,149 | 16 |
+| Set 2 | BRAM36 5개 (A 4 KB + B 16 KB) + LUTRAM 일부 | 2,367 | 18 |
+| Set 3 | BRAM36 2개 (A 4 KB + B 4 KB) + LUTRAM 일부 | 2,462 | 18 |
+| Set 4 | BRAM36 5개 (A 16 KB + B 4 KB) + LUTRAM 일부 | 4,144 (ACC 3벌 추가) | 17 |
 
 정확한 값은 `synth.py`(Vivado)로 확인해야 합니다.
 
 ## Set 3 (단계적 B reuse)는?
 
-Set 3은 `gemm_control.v`의 loop 순서(묶음 → row → col → k)를 바꿔야 하므로 **규칙 밖**입니다. `set3/`에는 `operand_loader.v`(Set 2와 같고 B buffer만 4 KB)와 `gemm_control.v` 두 파일만 있고, `gemm_top.v`는 baseline 그대로입니다. 두 파일의 `BBUF_DEPTH`는 같아야 합니다. 공식 테스트벤치 44 case를 통과했고, 64×128×128에서 같은 4 KB buffer로 Set 2(−60%)보다 훨씬 좋은 −91%입니다. 쓰려면 진행자님 허락이 필요합니다.
+Set 3은 `gemm_control.v`의 loop 순서(묶음 → row → col → k)를 바꿔야 하므로 **규칙 밖**입니다. `set3/`에는 `operand_loader.v`(Set 2와 같고 B buffer만 4 KB)와 `gemm_control.v` 두 파일만 있고, `gemm_top.v`는 baseline 그대로입니다. 두 파일의 `BBUF_DEPTH`는 같아야 합니다. 공식 테스트벤치 49 case를 통과했고, 64×128×128에서 같은 4 KB buffer로 Set 2(−60%)보다 훨씬 좋은 −91%입니다. 쓰려면 진행자님 허락이 필요합니다.
 
 ## 이름
 
-A reuse buffer (팀 카톡과 Sparsity 팀에서는 "A cache"라고도 부름), B reuse buffer. 코드의 parameter·instance 이름(`ACACHE_DEPTH`, `a_cache`, `BBUF_DEPTH`, `b_buf`)은 그대로 두었습니다.
+A reuse buffer (팀 카톡과 Sparsity 팀에서는 "A cache"라고도 부름), B reuse buffer. 코드 이름은 `ABUF_DEPTH`/`a_buf`, `BBUF_DEPTH`/`b_buf`.
+
+## Set 4 — ACC 4개 (output blocking) + B share (규칙 밖)
+
+`set4/`에 4개 파일: `gemm_top.v`, `gemm_control.v`, `operand_loader.v`, `mac_array.v`.
+`sparsity_frontend.v`, `result_writer.v`는 baseline 그대로입니다. 설정은 모두 `gemm_top.v` parameter 한 곳에 있습니다.
+
+**loop 순서:** column 그룹 → row 블록(row tile 4개) → column tile → k → **ACC 번호(bank)**
+
+| 부분 | 하는 일 |
+|---|---|
+| `mac_array` | 부분합 ACC를 `NBANK`(4)벌 둠. packet의 `op_bank`가 어느 tile의 부분합을 갱신할지 선택 |
+| `gemm_control` | 위 loop 순서로 descriptor를 냄. tile마다 write를 기다리지 않고, tile의 C 주소를 결과 FIFO에 넣어 순서대로 writer에 줌. loader에 bank·buffer hit/fill·주소를 직접 알려줌 |
+| `operand_loader` | bank 0 packet만 B를 읽고, bank 1~3은 직전 bank 0의 B를 그대로 씀 (B share). A buffer 16 KB(row 블록 4 tile × K), B buffer 4 KB(Set 3과 같은 그룹 방식). zero skip 없음 |
+| `gemm_top` | 새 신호 연결, bank 번호를 sparsity_frontend 옆으로 작은 FIFO로 전달 |
+
+| parameter (`gemm_top`) | 기본값 | 의미 |
+|---|---|---|
+| `NBANK` | 4 | ACC 수 = 같이 계산하는 row tile 수. 1이면 Set 3 순서 |
+| `USE_A_REUSE`, `USE_B_REUSE` | 1 | A·B reuse buffer |
+| `USE_B_SHARE` | 1 | bank 1~3이 bank 0의 B packet 재사용 |
+| `NSLOTS` | 4 | packet 슬롯 |
+| `ABUF_DEPTH` | 4096 | A buffer entry × 4 B = 16 KB (NBANK × K, K=1024까지) |
+| `BBUF_DEPTH` | 1024 | B buffer entry × 4 B = 4 KB |
+
+시뮬레이션에서 바꾸기: `--param top.NBANK=1` 처럼 `top.` 접두사.
+
+결과는 위 "측정 결과" 표를 보세요. 받은 set4.html의 이전 구현(순차 처리)은 64×128×128에서 353,800 cycle이었습니다.

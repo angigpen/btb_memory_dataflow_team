@@ -2,7 +2,7 @@
 // =====================================================================
 // operand_loader  --  SET 2 : Phase 1 + 2a + 3, inside operand_loader.v only
 // Memory/Dataflow team.  gemm_control.v / gemm_top.v are the baseline files.
-//   Phase 1  : A reuse buffer + zero read skip
+//   Phase 1  : A reuse buffer   (zero read skip removed: every packet reads its B)
 //   Phase 2a : packet slots (NSLOTS=2 is Ping/Pong; 4 lets packets that need no memory read
 //              queue up behind one that does)
 //   Phase 3  : on-chip buffer = A reuse + B reuse. B reuse buffer is filled in row tile 0 and
@@ -20,7 +20,7 @@
 //   B reuse buffer address = col index * K + kk                   (K = req_a_stride)
 //
 // Block diagram (same names as the slides):
-//   Request intake -> slot -> (1-cycle RAM read) -> Prep: buffer data, zero-skip decision, need mask
+//   Request intake -> slot -> (1-cycle RAM read) -> Prep: buffer data, need mask
 //   Load control   : one byte request at a time for each bit of the oldest slot's need mask;
 //                    {slot, byte} of the outstanding request is kept in one register
 //   Response router: writes the returned byte into that slot;
@@ -29,18 +29,16 @@
 //   Supply control : op_valid when the oldest slot is complete; MAC handshake frees it
 //
 // Switches (gemm_top passes only PE_ROWS/PE_COLS, so edit the defaults here):
-//   USE_A_REUSE, USE_ZERO_SKIP, USE_B_REUSE : 0/1
+//   USE_A_REUSE, USE_B_REUSE : 0/1
 //   NSLOTS       : packet slots, power of 2
-//   ACACHE_DEPTH : A reuse buffer entries (one per kk); kk >= depth reads A from memory
+//   ABUF_DEPTH   : A reuse buffer entries (one per kk); kk >= depth reads A from memory
 //   BBUF_DEPTH   : B reuse buffer entries x 4 byte (one per column tile x kk); 4096 = 16 KB =
 //                  all of B at K=N=128. Entries beyond the depth read B from memory.
-//                  A 1-bit valid RAM marks entries whose B was zero-skipped in row tile 0;
-//                  the first later row tile that needs such a B fetches and stores it.
 // =====================================================================
 module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
-                        parameter USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_B_REUSE=1,
+                        parameter USE_A_REUSE=1, USE_B_REUSE=1,
                         parameter NSLOTS=4,
-                        parameter ACACHE_DEPTH=1024, BBUF_DEPTH=4096)(
+                        parameter ABUF_DEPTH=1024, BBUF_DEPTH=4096)(
     input clk,rst,
     input req_valid,output req_ready,
     input [31:0] req_a_addr,req_b_addr,input [15:0] req_a_stride,
@@ -58,9 +56,8 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     localparam IW=$clog2(NI);
     localparam SB=(NSLOTS>1)?$clog2(NSLOTS):1;
     localparam AWID=8*PE_ROWS, BWID=8*PE_COLS;
-    localparam AAW=(ACACHE_DEPTH>1)?$clog2(ACACHE_DEPTH):1;
+    localparam AAW=(ABUF_DEPTH>1)?$clog2(ABUF_DEPTH):1;
     localparam BAW=(BBUF_DEPTH>1)?$clog2(BBUF_DEPTH):1;
-    localparam ZS=(USE_ZERO_SKIP!=0) && (USE_A_REUSE!=0);
     localparam [SB-1:0] SLOT_LAST=NSLOTS-1;
 
     function integer popc(input [NI-1:0] v); integer j; begin popc=0; for(j=0;j<NI;j=j+1) popc=popc+v[j]; end endfunction
@@ -98,8 +95,8 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     wire        col0_now = req_first ? newrow : col0_r;
     wire        row0_now = req_first ? (req_a_addr == 0) : row0_r;
     wire [31:0] req_bbuf_addr = cidx_now * req_a_stride + req_kk;   // col index * K + kk
-    wire hit_a  = (USE_A_REUSE!=0) && !col0_now && (req_kk < ACACHE_DEPTH);
-    wire fill_a = (USE_A_REUSE!=0) &&  col0_now && (req_kk < ACACHE_DEPTH);
+    wire hit_a  = (USE_A_REUSE!=0) && !col0_now && (req_kk < ABUF_DEPTH);
+    wire fill_a = (USE_A_REUSE!=0) &&  col0_now && (req_kk < ABUF_DEPTH);
     wire hit_b  = (USE_B_REUSE!=0) && !row0_now && (req_bbuf_addr < BBUF_DEPTH);
     wire fill_b = (USE_B_REUSE!=0) &&  row0_now && (req_bbuf_addr < BBUF_DEPTH);
     assign req_ready = !alloc[wptr] && !rst;
@@ -107,42 +104,25 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
 
     // ---------------- on-chip RAMs ----------------
     reg aw_pend, bw_pend; reg [SB-1:0] aw_s, bw_s;
-    wire [AWID:0] acq; wire [BWID-1:0] bq;
-    generate if(USE_A_REUSE!=0) begin: g_acache
-        wire [AWID-1:0] w = s_a[aw_s];
-        sdp_ram #(.WIDTH(AWID+1),.DEPTH(ACACHE_DEPTH)) a_cache(.clk(clk),
-            .we(aw_pend),.waddr(s_kk[aw_s][AAW-1:0]),.wdata({(w=={AWID{1'b0}}),w}),
+    wire [AWID-1:0] acq; wire [BWID-1:0] bq;
+    generate if(USE_A_REUSE!=0) begin: g_abuf
+        sdp_ram #(.WIDTH(AWID),.DEPTH(ABUF_DEPTH)) a_buf(.clk(clk),
+            .we(aw_pend),.waddr(s_kk[aw_s][AAW-1:0]),.wdata(s_a[aw_s]),
             .re(accept && hit_a),.raddr(req_kk[AAW-1:0]),.rdata(acq));
-    end else begin: g_no_acache
-        assign acq={(AWID+1){1'b0}};
+    end else begin: g_no_abuf
+        assign acq={AWID{1'b0}};
     end endgenerate
-    // B reuse buffer valid bits (separate 1-bit RAM, own write port): written in row tile 0
-    // for every filled entry; 0 when that B was zero-skipped and so never fetched.
-    wire bvq;
-    wire bv_we;
-    wire bv_wd;
     generate if(USE_B_REUSE!=0) begin: g_bbuf
         sdp_ram #(.WIDTH(BWID),.DEPTH(BBUF_DEPTH)) b_buf(.clk(clk),
             .we(bw_pend),.waddr(s_bba[bw_s][BAW-1:0]),.wdata(s_b[bw_s]),
             .re(accept && hit_b),.raddr(req_bbuf_addr[BAW-1:0]),.rdata(bq));
-        sdp_ram #(.WIDTH(1),.DEPTH(BBUF_DEPTH)) b_valid(.clk(clk),
-            .we(bv_we),.waddr(s_bba[cap_s][BAW-1:0]),.wdata(bv_wd),
-            .re(accept && hit_b),.raddr(req_bbuf_addr[BAW-1:0]),.rdata(bvq));
     end else begin: g_no_bbuf
-        assign bq={BWID{1'b0}}; assign bvq=1'b0;
+        assign bq={BWID{1'b0}};
     end endgenerate
 
-    // ---------------- prep (data from RAMs, zero-skip decision) ----------------
-    wire zf     = cap_hita && acq[AWID];
-    wire b_ok   = cap_hitb && bvq;                              // B is in the reuse buffer
-    wire skip_b = ZS && zf && !b_ok;                            // A all zero: B not needed
+    // ---------------- prep (data from RAMs) ----------------
     wire [PE_ROWS-1:0] need_a = cap_hita ? {PE_ROWS{1'b0}} : s_rows[cap_s];
-    wire [PE_COLS-1:0] need_b = (b_ok || skip_b) ? {PE_COLS{1'b0}} : s_cols[cap_s];
-    // B reuse buffer fill: row tile 0 writes every entry (valid=0 if zero-skipped).
-    // A later row that finds an entry invalid and does need B fetches it once and stores it.
-    wire refill_b = cap_hitb && !bvq && !skip_b;
-    assign bv_we = cap_v && (s_fillb[cap_s] || refill_b);
-    assign bv_wd = !skip_b;                                     // data written when it arrives
+    wire [PE_COLS-1:0] need_b = cap_hitb ? {PE_COLS{1'b0}} : s_cols[cap_s];
 
     // ---------------- load control (issue) ----------------
     reg          busy_q;                              // one request outstanding
@@ -202,14 +182,13 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
             end
             // ---- prep: RAM data arrived, decide what must be read ----
             if(cap_v) begin
-                s_a[cap_s]<=cap_hita ? acq[AWID-1:0] : {AWID{1'b0}};
-                s_b[cap_s]<=b_ok ? bq : {BWID{1'b0}};
+                s_a[cap_s]<=cap_hita ? acq : {AWID{1'b0}};
+                s_b[cap_s]<=cap_hitb ? bq : {BWID{1'b0}};
                 s_rem[cap_s]<={need_b,need_a};
                 s_left[cap_s]<=popc({need_b,need_a});
                 s_aleft[cap_s]<=popc({{PE_COLS{1'b0}},need_a});
                 s_bleft[cap_s]<=popc({need_b,{PE_ROWS{1'b0}}});
                 prep[cap_s]<=1'b1;
-                if(refill_b) s_fillb[cap_s]<=1'b1;
             end
             // ---- load control: issue one byte request per cycle ----
             if(req_fire) begin
@@ -244,7 +223,7 @@ endmodule
 // Simple dual-port RAM: one write port, one read port, 1-cycle read latency.
 // Kept inside this file because run.py compiles a fixed list of six .v files.
 // Pattern Vivado infers as BRAM (large) or LUTRAM (small): no reset, registered read.
-module sdp_ram #(parameter WIDTH=33, DEPTH=1024,
+module sdp_ram #(parameter WIDTH=32, DEPTH=1024,
                  parameter AW=(DEPTH>1)?$clog2(DEPTH):1)(
     input clk,
     input we, input [AW-1:0] waddr, input [WIDTH-1:0] wdata,

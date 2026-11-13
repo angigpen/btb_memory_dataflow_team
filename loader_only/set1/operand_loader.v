@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 // =====================================================================
-// operand_loader  --  SET 1 : Phase 1 (A reuse + zero read skip) + Phase 2a (Ping/Pong)
+// operand_loader  --  SET 1 : Phase 1 (A reuse) + Phase 2a (Ping/Pong)   [no zero read skip]
 // Memory/Dataflow team.  Only this file differs from the baseline (README: our file).
 //
 // Memory contract (INTERFACES.md): 1 byte per request, at most ONE outstanding request.
@@ -14,16 +14,15 @@
 //    column tile 0 are done before column tile 1 begins.)
 //
 // Switches (parameters; gemm_top passes only PE_ROWS/PE_COLS, so edit the defaults here):
-//   USE_A_REUSE   A reuse buffer: K entries x (4 A bytes + zero flag)          (Phase 1a)
-//   USE_ZERO_SKIP if the buffered A word is all zero, skip the 4 B reads; the packet still
-//                 goes to the MAC with B=0 so op_first/op_last stay intact     (Phase 1b)
+//   USE_A_REUSE   A reuse buffer: K entries x 4 A bytes                          (Phase 1)
 //   USE_DBUF      two packet slots (Ping/Pong): fill one while the other waits for the MAC (2a)
-//   ACACHE_DEPTH  A reuse buffer entries; kk >= depth reads A from memory (any K works)
-//   All three switches 0 -> identical to the baseline loader (cycles and reads).
+//   ABUF_DEPTH    A reuse buffer entries; kk >= depth reads A from memory (any K works)
+//   Both switches 0 -> identical to the baseline loader (cycles and reads).
+//   Zero read skip was removed (team decision): every packet reads its B bytes.
 // =====================================================================
 module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
-                        parameter USE_A_REUSE=1, USE_ZERO_SKIP=1, USE_DBUF=1,
-                        parameter ACACHE_DEPTH=1024)(
+                        parameter USE_A_REUSE=1, USE_DBUF=1,
+                        parameter ABUF_DEPTH=1024)(
     input clk,rst,
     input req_valid,output req_ready,
     input [31:0] req_a_addr,req_b_addr,input [15:0] req_a_stride,
@@ -40,9 +39,8 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     localparam IDLE=0,A_CRD=1,A_REQ=2,A_RSP=3,B_REQ=4,B_RSP=5;
     localparam RB=(PE_ROWS>1)?$clog2(PE_ROWS):1, CB=(PE_COLS>1)?$clog2(PE_COLS):1;
     localparam NS=(USE_DBUF!=0)?2:1;                 // packet slots
-    localparam AW=(ACACHE_DEPTH>1)?$clog2(ACACHE_DEPTH):1;
+    localparam AW=(ABUF_DEPTH>1)?$clog2(ABUF_DEPTH):1;
     localparam AWID=8*PE_ROWS;
-    localparam ZS=(USE_ZERO_SKIP!=0) && (USE_A_REUSE!=0);
     localparam [0:0] FLIP=(USE_DBUF!=0);
 
     // ---------------- packet slots (Ping / Pong) ----------------
@@ -70,22 +68,21 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
     wire accept   = req_valid && req_ready;
     wire [15:0] kk_now = req_first ? 16'd0 : kk_r + 1'b1;
     wire        col0_now = req_first ? (req_b_addr < PE_COLS) : col0_r;
-    wire kk_fits  = (kk_now < ACACHE_DEPTH);
+    wire kk_fits  = (kk_now < ABUF_DEPTH);
     wire hit_a    = (USE_A_REUSE!=0) && !col0_now && kk_fits;   // A from the reuse buffer
     wire do_fill  = (USE_A_REUSE!=0) &&  col0_now && kk_fits;   // A from memory, store it
 
     // ---------------- A reuse buffer (RAM, 1-cycle read) ----------------
     reg  aw_pend;
     reg  [15:0] aw_kk;
-    wire [AWID:0] cache_q;                           // {zero_flag, A word}
-    wire [AWID-1:0] aw_word = s_a[wr];
-    generate if(USE_A_REUSE!=0) begin: g_acache
-        sdp_ram #(.WIDTH(AWID+1),.DEPTH(ACACHE_DEPTH)) a_cache(
+    wire [AWID-1:0] abuf_q;                          // A word read from the buffer
+    generate if(USE_A_REUSE!=0) begin: g_abuf
+        sdp_ram #(.WIDTH(AWID),.DEPTH(ABUF_DEPTH)) a_buf(
             .clk(clk),
-            .we(aw_pend),.waddr(aw_kk[AW-1:0]),.wdata({(aw_word=={AWID{1'b0}}),aw_word}),
-            .re(accept && hit_a),.raddr(kk_now[AW-1:0]),.rdata(cache_q));
-    end else begin: g_no_acache
-        assign cache_q={(AWID+1){1'b0}};
+            .we(aw_pend),.waddr(aw_kk[AW-1:0]),.wdata(s_a[wr]),
+            .re(accept && hit_a),.raddr(kk_now[AW-1:0]),.rdata(abuf_q));
+    end else begin: g_no_abuf
+        assign abuf_q={AWID{1'b0}};
     end endgenerate
 
     // ---------------- handshakes ----------------
@@ -121,10 +118,7 @@ module operand_loader #(parameter PE_ROWS=4, PE_COLS=4,
                     state<=hit_a?A_CRD:A_REQ;
                 end
                 A_CRD: begin                                   // buffer data arrives this cycle
-                    s_a[wr]<=cache_q[AWID-1:0];
-                    if(ZS && cache_q[AWID]) begin              // all-zero A: no B reads
-                        full[wr]<=1'b1; wr<=wr^FLIP; state<=IDLE;
-                    end else state<=B_REQ;
+                    s_a[wr]<=abuf_q; state<=B_REQ;
                 end
                 A_REQ: if(!s_rows[wr][ar]) begin
                     if(ar==PE_ROWS-1) begin state<=B_REQ; aw_pend<=fill_a; aw_kk<=kk_w; end
@@ -153,7 +147,7 @@ endmodule
 // Simple dual-port RAM, 1-cycle read. No reset on the array, registered read data:
 // the pattern Vivado infers as BRAM (or LUTRAM when small). Kept in this file because
 // the flow compiles a fixed list of six .v files.
-module sdp_ram #(parameter WIDTH=33, DEPTH=1024,
+module sdp_ram #(parameter WIDTH=32, DEPTH=1024,
                  parameter AW=(DEPTH>1)?$clog2(DEPTH):1)(
     input clk,
     input we, input [AW-1:0] waddr, input [WIDTH-1:0] wdata,

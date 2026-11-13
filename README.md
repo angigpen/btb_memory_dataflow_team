@@ -19,15 +19,12 @@ proj_btb/
 │   └── build/                  실행별 summary.csv, waves.html (결과 + 파형 + 애니메이션, 약 10 MB)
 │
 ├── baseline/                   배포본 RTL 6개 (loader_only/baseline/과 같음)
-├── set1_phase1_2a/             이전 버전 Set 1 (gemm_control·gemm_top도 고친 버전)
-├── tb/tb_local.sv, tb/*.gtkw   이전 버전 로컬 테스트벤치 / GTKWave 설정
-├── scripts/                    이전 버전 스크립트 (run_local.py 등)
 └── Claude outputs/             zip, 발표 자료(pptx), rename_terms.py
 ```
 
 ## 이전 버전과 바뀐 점
 
-| | 이전 버전 (최상위 폴더) | 현재 버전 (`loader_only/`) |
+| | 이전 버전 (삭제됨, git 기록에 남아 있음) | 현재 버전 (`loader_only/`) |
 |---|---|---|
 | 고친 파일 | `gemm_control.v`, `gemm_top.v`, `operand_loader.v` | **`operand_loader.v`만** (Set 3만 `gemm_control.v` 추가) |
 | 테스트벤치 | 직접 만든 `tb_local.sv` | **공식 `tb_gemm.sv`** (Icarus로 실행) |
@@ -36,7 +33,7 @@ proj_btb/
 | loader의 위치 정보 | `gemm_control`이 `req_kk`, `req_reuse_a/b` 등을 출력 | loader가 descriptor(`req_first`, `req_a_addr`, `req_b_addr`)에서 스스로 계산 |
 | B reuse buffer | — | 1-bit valid RAM 추가: zero skip으로 안 읽은 B도 나중에 한 번만 읽음 |
 
-예전 `set2_all_phases/`, `set3_grouped_b/`, `results/`는 지웠습니다. 남은 최상위 `set1_phase1_2a/`, `tb/tb_local.sv`, `scripts/`는 참고용이며, `scripts/run_local.py`는 `baseline`, `s1_*` variant만 실행됩니다 (`s2_*`, `s3_*`는 지운 폴더를 가리킴).
+이전 버전 폴더(`set1_phase1_2a/`, `set2_all_phases/`, `set3_grouped_b/`, `tb/tb_local.sv`, `scripts/`, `results/`)는 모두 지웠습니다. 필요하면 git 기록에서 복원할 수 있습니다.
 
 ## 결과 요약 (공식 테스트벤치, Icarus)
 
@@ -63,9 +60,4 @@ proj_btb/
 A reuse buffer, B reuse buffer (팀 카톡과 Sparsity 팀에서는 A 쪽을 "A cache"라고도 부름).
 
 - `loader_only/`: 코드 이름은 그대로 `ACACHE_DEPTH`/`a_cache`, `BBUF_DEPTH`/`b_buf`, Set 1 FSM state `A_CRD`.
-- 이전 버전 `set1_phase1_2a/`: `ABUF_DEPTH`/`a_buf`, `A_BRD`로 바꿔 둠.
 
-## 진행자님께 확인할 것
-
-1. B reuse buffer 16 KB(BRAM36 4개) 사용이 괜찮은지. Set 3은 4 KB(BRAM36 1개)로 64×128×128에서 −91%까지 줄일 수 있습니다.
-2. Set 3은 `gemm_control.v`의 loop 순서를 바꾸므로 규칙 밖입니다. 써도 되는지, Compute 팀과 분담을 어떻게 할지.

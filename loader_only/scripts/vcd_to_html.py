@@ -1,6 +1,7 @@
-"""Turn the official-testbench waveforms of baseline / Set 1 / Set 2 / Set 3 into one self-contained HTML viewer.
+"""Turn the official-testbench waveforms of baseline / Set 1-4 into one self-contained HTML viewer.
 
-All RTL is the loader_only version (Memory/Dataflow edits operand_loader.v only; Set 3 also gemm_control.v).
+Set 1/2 change operand_loader.v only; Set 3 also gemm_control.v; Set 4 also mac_array.v and gemm_top.v.
+No set uses zero read skip any more.
 Simulation = official tb/tb_gemm.sv (one outstanding memory request) run with Icarus by run_official.py.
 
     ./make_waves.sh                    # all waveforms + 64x128x128 buffer sweep into build/ (~15 min)
@@ -18,6 +19,7 @@ CTRL_ST = {0: 'IDLE', 1: 'ISSUE', 2: 'RESULT', 3: 'WRITE'}
 S3_CTRL_ST = {**CTRL_ST, 4: 'SETUP'}
 BASE_LD_ST = {0: 'IDLE', 1: 'A_REQ', 2: 'A_RSP', 3: 'B_REQ', 4: 'B_RSP', 5: 'OFFER'}
 S1_LD_ST = {0: 'IDLE', 1: 'A_BUF', 2: 'A_REQ', 3: 'A_RSP', 4: 'B_REQ', 5: 'B_RSP'}
+S4_CTRL_ST = {0: 'IDLE', 1: 'ISSUE', 2: 'DRAIN', 4: 'SETUP'}
 
 # (group, label, vcd path, kind[, enum map[, style]])   kind: bit | dec | hex | bin | enum
 COMMON_TOP = [
@@ -68,10 +70,12 @@ ANIM = {
                              'tb_gemm.dut.loader.accept', 'tb_gemm.dut.loader.hit_a', 'tb_gemm.dut.loader.aw_pend'],
     's2_all': ANIM_COMMON + ['tb_gemm.dut.loader.alloc', 'tb_gemm.dut.loader.prep', 'tb_gemm.dut.loader.rd',
                              'tb_gemm.dut.loader.busy_q', 'tb_gemm.dut.loader.cap_v', 'tb_gemm.dut.loader.cap_hita',
-                             'tb_gemm.dut.loader.cap_hitb', 'tb_gemm.dut.loader.skip_b', 'tb_gemm.dut.loader.aw_pend',
+                             'tb_gemm.dut.loader.cap_hitb', 'tb_gemm.dut.loader.aw_pend',
                              'tb_gemm.dut.loader.bw_pend'],
 }
 ANIM['s3_all'] = ANIM['s2_all'] + ['tb_gemm.dut.control.grp_start', 'tb_gemm.dut.control.gw']
+ANIM['s4_all'] = ANIM['s3_all'] + ['tb_gemm.dut.control.rb', 'tb_gemm.dut.control.bank', 'tb_gemm.dut.cbank',
+                                   'tb_gemm.dut.control.cnt']
 
 SETS = {
     'baseline': dict(name='Baseline', title='Baseline — original RTL (one request at a time, no reuse)',
@@ -80,7 +84,7 @@ SETS = {
         ('operand_loader', 'op_valid', 'tb_gemm.dut.loader.op_valid', 'bit'),
         ('operand_loader', 'op_ready', 'tb_gemm.dut.loader.op_ready', 'bit'),
     ] + OUT),
-    's1_all': dict(name='Set 1', title='Set 1 — Phase 1 + 2a (A reuse, zero skip, Ping/Pong)',
+    's1_all': dict(name='Set 1', title='Set 1 — Phase 1 + 2a (A reuse buffer, Ping/Pong)',
                    signals=COMMON_TOP + ctrl(reuse_a=True) + MEM + [
         ('operand_loader (Ping/Pong)', 'loader.state', 'tb_gemm.dut.loader.state', 'enum', S1_LD_ST),
         ('operand_loader (Ping/Pong)', 'wr', 'tb_gemm.dut.loader.wr', 'bit'),
@@ -96,11 +100,27 @@ SETS = {
         ('gemm_control', 'grp_start', 'tb_gemm.dut.control.grp_start', 'dec'),
         ('gemm_control', 'gw (group width)', 'tb_gemm.dut.control.gw', 'dec'),
     ]) + MEM + SLOT_LOADER + OUT),
+    's4_all': dict(name='Set 4', title='Set 4 — Set 3 + 4 ACC banks in mac_array (row block of 4 tiles, B packet shared)',
+                   signals=COMMON_TOP + [
+        ('gemm_control', 'control.state', 'tb_gemm.dut.control.state', 'enum', S4_CTRL_ST),
+        ('gemm_control', 'rb (row block)', 'tb_gemm.dut.control.rb', 'dec'),
+        ('gemm_control', 'bank', 'tb_gemm.dut.control.bank', 'dec'),
+        ('gemm_control', 'row (= rb + 4·bank)', 'tb_gemm.dut.control.row', 'dec'),
+        ('gemm_control', 'col', 'tb_gemm.dut.control.col', 'dec'),
+        ('gemm_control', 'kk', 'tb_gemm.dut.control.kk', 'dec'),
+        ('gemm_control', 'grp_start', 'tb_gemm.dut.control.grp_start', 'dec'),
+        ('gemm_control', 'results queued (FIFO)', 'tb_gemm.dut.control.cnt', 'dec'),
+        ('gemm_control → loader', 'A from buffer', 'tb_gemm.dut.control.req_a_hit', 'bit'),
+        ('gemm_control → loader', 'B from buffer', 'tb_gemm.dut.control.req_b_hit', 'bit'),
+        ('gemm_control → loader', 'B shared (bank ≥ 1)', 'tb_gemm.dut.control.req_b_share', 'bit'),
+    ] + MEM + SLOT_LOADER + [
+        ('mac_array', 'ACC bank of packet', 'tb_gemm.dut.cbank', 'dec'),
+    ] + OUT),
 }
 
 # ---------------- on-chip storage, computed from the RTL declarations ----------------
 import math, re as _re
-SRC_DIR = {'baseline': 'baseline', 's1_all': 'set1', 's2_all': 'set2', 's3_all': 'set3'}
+SRC_DIR = {'baseline': 'baseline', 's1_all': 'set1', 's2_all': 'set2', 's3_all': 'set3', 's4_all': 'set4'}
 
 
 def _hdr_params(path, module):
@@ -115,7 +135,7 @@ def top_params(v):
     d = ROOT / SRC_DIR[v]
     P = _hdr_params(ROOT / 'baseline' / 'gemm_top.v', 'gemm_top')
     P.update(_hdr_params(d / 'operand_loader.v', 'operand_loader'))
-    if 'ACACHE_DEPTH' in P: P['ABUF_DEPTH'] = P['ACACHE_DEPTH']          # A reuse buffer depth
+    if (d / 'gemm_top.v').exists(): P.update(_hdr_params(d / 'gemm_top.v', 'gemm_top'))   # Set 4 settings
     return P
 
 
@@ -144,8 +164,8 @@ def memory(v, over=None):
                        src='s_a, s_b, s_rows, s_cols, s_first, s_last'))
         if P.get('USE_A_REUSE', 1):
             d = P['ABUF_DEPTH']
-            it.append(dict(key='abuf', name='A reuse buffer (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
-                           bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_cache'))
+            it.append(dict(key='abuf', name='A reuse buffer', shape=f'{d} × {8 * R} b', bits=d * 8 * R,
+                           bram=bram36(d, 8 * R), kind='BRAM', src='sdp_ram a_buf'))
         it.append(dict(key='pos', name='Position from descriptors', shape='16 + 16 + 1 + 1 b', bits=34, bram=0, kind='FF',
                        src='kk_r, kk_w, col0_r, fill_a'))
         return it
@@ -158,19 +178,28 @@ def memory(v, over=None):
                    src='s_aaddr, s_baddr, s_kk, s_bba, s_filla/b, s_rem, s_left, s_aleft/bleft'))
     it.append(dict(key='req', name='Outstanding request (one at a time)', shape=f'1 × {1 + sb + iw} b', bits=1 + sb + iw, bram=0,
                    kind='FF', src='busy_q, q_s, q_i'))
-    it.append(dict(key='pos', name='Position from descriptors', shape='16 + 32 + 8 + 2 b', bits=58, bram=0, kind='FF',
-                   src='kk_r, afirst_r, cidx_r, row0_r, col0_r'))
+    if v == 's4_all':
+        it.append(dict(key='pos', name='Side-band from gemm_control (per slot: bank, share, buffer addresses)', shape=f'{ns} × {2 + 1 + 12 + 10} b',
+                       bits=ns * 25, bram=0, kind='FF', src='s_bank, s_share, s_aba, s_bba'))
+    else:
+        it.append(dict(key='pos', name='Position from descriptors', shape='16 + 32 + 8 + 2 b', bits=58, bram=0, kind='FF',
+                       src='kk_r, afirst_r, cidx_r, row0_r, col0_r'))
     if P.get('USE_A_REUSE', 1):
         d = P['ABUF_DEPTH']
-        it.append(dict(key='abuf', name='A reuse buffer (A word + zero flag)', shape=f'{d} × {8 * R + 1} b', bits=d * (8 * R + 1),
-                       bram=bram36(d, 8 * R + 1), kind='BRAM', src='sdp_ram a_cache'))
+        it.append(dict(key='abuf', name='A reuse buffer', shape=f'{d} × {8 * R} b', bits=d * 8 * R,
+                       bram=bram36(d, 8 * R), kind='BRAM', src='sdp_ram a_buf'))
     if P.get('USE_B_REUSE', 1):
         d = P['BBUF_DEPTH']
         it.append(dict(key='bbuf', name='B reuse buffer', shape=f'{d} × {8 * C} b', bits=d * 8 * C, bram=bram36(d, 8 * C), kind='BRAM',
                        src='sdp_ram b_buf'))
-        it.append(dict(key='bval', name='B reuse buffer valid bits', shape=f'{d} × 1 b', bits=d, bram=bram36(d, 1), kind='BRAM/LUTRAM',
-                       src='sdp_ram b_valid'))
-    if v == 's3_all':
+    if v == 's4_all':
+        nb = P.get('NBANK', 4)
+        it.append(dict(key='acc', name=f'Extra ACC banks in mac_array ({nb - 1} more × 16 PE)', shape=f'{(nb - 1) * R * C} × 32 b',
+                       bits=(nb - 1) * R * C * 32, bram=0, kind='FF', src='mac_array acc[NBANK*P]'))
+        it.append(dict(key='blat', name='Shared B word (last bank-0 packet)', shape=f'1 × {8 * C} b', bits=8 * C, bram=0, kind='FF', src='b_latch'))
+        it.append(dict(key='rfifo', name='Result base FIFO (C address per finished tile)', shape='8 × 32 b', bits=256, bram=0, kind='FF/LUTRAM',
+                       src='gemm_control fifo'))
+    if v in ('s3_all', 's4_all'):
         it.append(dict(key='grp', name='Group registers (gemm_control)', shape='4 × 16 b + 32 b + 1 state bit', bits=4 * 16 + 32 + 1,
                        bram=0, kind='FF', src='grp_start, grp_end, gw, g_cnt, g_acc, state[2]'))
     return it
@@ -226,6 +255,9 @@ def parse_vcd(path, wanted):
     return out, cyc
 
 
+MAX_CYCLES = 300000          # longer runs keep only their first 300k cycles (file size)
+
+
 def trim(data, ncyc):
     """Cut the reset/config prologue: start a few cycles before busy first rises."""
     busy = data.get('tb_gemm.dut.busy', [])
@@ -235,6 +267,7 @@ def trim(data, ncyc):
     done = data.get('tb_gemm.dut.done', [])
     d1 = [c for c, v in done if v == 1]
     if d1: end = min(ncyc, d1[-1] + 6)
+    if end - start > MAX_CYCLES: end = start + MAX_CYCLES; d1 = []
     res = {}
     for p, ch in data.items():
         before = [v for c, v in ch if c <= start]
@@ -253,17 +286,18 @@ def encode(seq):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--cases', default='rectangular,sparse_90,long_latency,bench_64x128x128_l23')
+    ap.add_argument('--cases', default='demo_8x8x4,demo_20x12x6,rectangular,long_latency,bench64,bench_64x128x128_l23')
     ap.add_argument('--build', type=Path, default=ROOT / 'build', help='run_official.py build root (waveforms, sweep)')
     ap.add_argument('--out', type=Path, default=ROOT / 'build/waves.html')
     a = ap.parse_args()
     B = a.build
     # waveform folders per variant (wave_<case>.vcd); *_big = long case, first 160k cycles only
-    WAVES = {'baseline': ['baseline', 'baseline_big'], 's1_all': ['set1', 'set1_big'], 's2_all': ['set2'], 's3_all': ['set3']}
+    WAVES = {'baseline': ['baseline', 'baseline_big'], 's1_all': ['set1', 'set1_big'], 's2_all': ['set2'], 's3_all': ['set3'],
+             's4_all': ['set4']}
     # result CSVs (official summary.csv format, + latency column); later files win
     RES = ROOT / 'results'
     srcs = [(RES / 'baseline.csv', 'baseline'), (RES / 's1.csv', 's1_all'), (RES / 's2.csv', 's2_all'),
-            (RES / 's3.csv', 's3_all'), (RES / 's2_b4k.csv', 's2_buf4k')]
+            (RES / 's3.csv', 's3_all'), (RES / 's4.csv', 's4_all')]
     srcs += [(B / d / 'summary.csv', v) for v, ds in WAVES.items() for d in ds]
     srcs += [(p / 'summary.csv', p.name) for p in sorted((B / 'sweep').glob('*'))]
     metrics = {}
@@ -274,7 +308,7 @@ def main():
             if r['run'] == '0':
                 r['lat'] = r.get('latency', '?'); metrics[(v, r['case'])] = r
     KEYS = ('m', 'n', 'k', 'lat', 'cycles', 'a_reads', 'b_reads', 'operand_wait')
-    payload = dict(sets={}, order=list(SETS), cases=a.cases.split(','), metrics={}, buffers=[])
+    payload = dict(sets={}, order=list(SETS), cases=a.cases.split(','), metrics={}, buffers=[], vals={})
     for v, spec in SETS.items():
         sigs = [dict(group=s[0], label=s[1], path=s[2], kind=s[3],
                      enum={str(k): x for k, x in (s[4] or {}).items()} if len(s) > 4 and s[4] else None,
@@ -289,6 +323,23 @@ def main():
             data, n, off, trunc = trim(data, n)
             payload['sets'][v]['waves'][c] = dict(n=n, offset=off, trunc=trunc,
                                                   data={p: encode(q) for p, q in data.items()})
+            # packets taken by mac_array (tb/pkt_trace.v): only for small cases (numbers are drawn)
+            pk = f.with_name(f'pkt_{c}.txt'); vec = f.parent / 'vectors' / c
+            cfg = [int(x, 16) for x in (vec / 'config.hex').read_text().split()] if (vec / 'config.hex').exists() else None
+            if pk.exists() and cfg and cfg[0] * cfg[1] <= 400 and cfg[2] <= 16:
+                M, N, K = cfg[:3]; sx = lambda h, b: int(h, 16) - (1 << b) if int(h, 16) >> (b - 1) else int(h, 16)
+                pkts = []
+                for ln in pk.read_text().split('\n'):
+                    t = ln.split()
+                    if len(t) < 9 or not (off <= int(t[0]) < off + n): continue
+                    aa, ba = int(t[1]), int(t[2])
+                    av = [sx(t[3][-2 * (i + 1):len(t[3]) - 2 * i], 8) for i in range(4)]
+                    bv = [sx(t[4][-2 * (i + 1):len(t[4]) - 2 * i], 8) for i in range(4)]
+                    pkts.append([int(t[0]) - off, aa // K, aa % K, ba % N, *av, *bv, int(t[5], 2), int(t[6], 2), int(t[7]), int(t[8])])
+                payload['sets'][v]['waves'][c]['pkt'] = pkts
+                if c not in payload['vals']:
+                    rd = lambda nm, b: [sx(h, b) for h in (vec / nm).read_text().split()]
+                    payload['vals'][c] = dict(a=rd('a.hex', 8), b=rd('b.hex', 8), c=rd('c.hex', 32))
             print(f'{v:8s} {c:22s} {n:7d} cycles' + ('  (window only)' if trunc else ''))
     for (v, c), r in metrics.items():
         if v in SETS:
@@ -297,7 +348,7 @@ def main():
     BUF = [('baseline', 'Baseline', '—'), ('s1_all', 'Set 1', '—'), ('s2_buf4k', 'Set 2', '4 KB'),
            ('s3_buf1k', 'Set 3', '1 KB (G=2)'), ('s3_buf2k', 'Set 3', '2 KB (G=4)'), ('s3_all', 'Set 3 (default)', '4 KB (G=8)'),
            ('s3_buf8k', 'Set 3', '8 KB (G=16)'), ('s2_all', 'Set 2 (default)', '16 KB (all of B)'),
-           ('s3_buf16k', 'Set 3', '16 KB (all of B)')]
+           ('s3_buf16k', 'Set 3', '16 KB (all of B)'), ('s4_all', 'Set 4 (default)', '4 KB (G=8) + ACC ×4, A buffer 16 KB')]
     payload['memory'] = {v: memory(v) for v in SETS}
     def total_bits(v):
         base, over = {'s2_buf4k': ('s2_all', dict(BBUF_DEPTH=1024)), 's3_buf1k': ('s3_all', dict(BBUF_DEPTH=256)),
@@ -320,7 +371,7 @@ def main():
 
 TEMPLATE = r'''<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<title>GEMM loader — baseline / Set 1 / Set 2 / Set 3 simulation</title>
+<title>GEMM loader — baseline / Set 1–4 simulation</title>
 <style>
 :root{--bg:#fbfbfa;--panel:#fff;--ink:#1f2328;--mute:#6b7280;--line:#e5e7eb;--grid:#f0f1f3;
  --hi:#2563eb;--hiF:rgba(37,99,235,.14);--bus:#0f766e;--busF:rgba(15,118,110,.08);--x:#dc2626;--cur:#f59e0b;--grp:#f3f4f6}
@@ -346,9 +397,12 @@ table{border-collapse:collapse;margin:0 24px 30px;background:var(--panel);border
 th,td{padding:6px 14px;border-bottom:1px solid var(--line);text-align:right}th{font-size:12px;color:var(--mute);font-weight:600}
 td:first-child,th:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
 h2{font-size:15px;margin:18px 24px 8px}.note{margin:0 24px 14px;color:var(--mute);font-size:13px;max-width:980px}.best{font-weight:700}
-#diagrams{display:grid;grid-template-columns:repeat(var(--dgcols,2),minmax(0,1fr));gap:12px;margin:0 24px 14px;align-items:start}
-.dg{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.dg .vtitle{padding:8px 14px;flex-wrap:wrap;font-size:calc(14px - var(--dgcols,2) * 0.5px)}.dg svg{display:block;width:100%;height:auto}
+/* sizes are in CSS px (not % of the window), so browser zoom (Cmd − / Cmd +) shrinks and enlarges everything,
+   and more diagrams fit per row when zoomed out */
+#diagrams{display:flex;flex-wrap:wrap;gap:12px;margin:0 24px 14px;align-items:flex-start}
+.dg{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;width:var(--dgw,760px);max-width:100%;flex:0 0 auto}
+.dg .vtitle{padding:8px 14px;flex-wrap:wrap;font-size:13px}.dg svg{display:block;width:100%;height:auto}
+.view{max-width:var(--wvw,1800px)}
 .dg canvas.mx{display:block;width:100%;height:auto;border-top:1px solid var(--line)}
 .dg p{margin:0;padding:0 14px 10px;color:var(--mute);font-size:12.5px}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 24px 10px;font-size:12px;color:var(--mute)}
@@ -357,9 +411,10 @@ svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 svg .mono{font-family:ui-monospace,Menlo,monospace}.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:8px;margin-left:6px;border:1px solid var(--line)}.tag.new{background:var(--hiF);color:var(--hi);border-color:var(--hi)}.tag.up{background:var(--busF);color:var(--bus);border-color:var(--bus)}.tag.down{color:var(--mute)}tr.sub td{color:var(--mute);font-size:12px}tr.tot td{font-weight:600}tr.grpTop td{border-top:2px solid var(--line)}
 </style></head><body>
 <header><h1>GEMM operand loader — simulation waveforms</h1>
-<p>Baseline, Set 1 (Phase 1 + 2a), Set 2 (Phase 1 + 2a + 3) and Set 3 (Set 2 + grouped loop), simulated with the official testbench
-(<code>tb_gemm.sv</code>, memory accepts one outstanding request) in Icarus. Only <code>operand_loader.v</code> differs from the baseline
-(Set 3 also <code>gemm_control.v</code>). One column = one clock cycle, sampled just before the rising edge.</p></header>
+<p>Baseline, Set 1 (A reuse + Ping/Pong), Set 2 (+ B reuse buffer), Set 3 (+ grouped loop) and Set 4 (+ 4 ACC banks), simulated with the official testbench
+(<code>tb_gemm.sv</code>, memory accepts one outstanding request) in Icarus. Set 1/2 change <code>operand_loader.v</code> only; Set 3 also
+<code>gemm_control.v</code>; Set 4 also <code>mac_array.v</code> and <code>gemm_top.v</code>. No set uses zero read skip.
+One column = one clock cycle, sampled just before the rising edge. The demo cases use values −3…3 so every number and partial sum is shown.</p></header>
 <div class="bar">
  <div class="seg" id="setSeg"></div>
  <div class="seg" id="caseSeg"></div>
@@ -374,7 +429,7 @@ svg .mono{font-family:ui-monospace,Menlo,monospace}.tag{display:inline-block;fon
 <p class="note">Counted: data storage on the operand path — packet registers/slots, request tracking, outstanding-request register, position-from-descriptor registers, A reuse buffer, B reuse buffer (bit widths
 taken from the <code>reg</code>/<code>sdp_ram</code> declarations and each set's <code>operand_loader.v</code> defaults; PE 4×4).
 Not counted: FSM/address/counter registers that baseline also has. BRAM36 = Xilinx block RAM count by aspect ratio
-(1K×36, 4K×9, …; BRAM18 = 0.5); Vivado may map small RAMs to LUTRAM instead. Yosys estimate in the README: Set 1 ≈ 1 BRAM36, Set 2 ≈ 5 BRAM36 + 1 BRAM18, Set 3 ≈ 2 BRAM36 (+ LUTRAM).</p>
+(1K×36, 4K×9, …; BRAM18 = 0.5); Vivado may map small RAMs to LUTRAM instead. Set 4 also keeps 3 extra ACC banks (48 × 32 b) in <code>mac_array</code>.</p>
 <h2>Block diagrams — animated from the simulation</h2>
 <div class="bar" style="padding-top:0">
  <button class="btn" id="play">▶ Play</button>
@@ -392,7 +447,8 @@ Not counted: FSM/address/counter registers that baseline also has. BRAM36 = Xili
 <div id="views"></div>
 <h2>B reuse buffer size — 64×128×128 (official testbench)</h2>
 <p class="note">Where Set 3 matters: B for 64×128×128 is 16 KB. With the same 4 KB reuse buffer, Set 2 can only reuse the column tiles that fit;
-Set 3 reorders the loop (group → row tile → col tile in group → kk) so the buffer is refilled per group and every byte of B is read once.</p>
+Set 3 reorders the loop (group → row tile → col tile in group → kk) so the buffer is refilled per group and every byte of B is read once.
+Set 4 reads the same bytes as Set 3 here; its ACC banks pay off when B does not fit any buffer (K = 512 or 1024, see the table at the bottom).</p>
 <table id="buf"></table>
 <h2>All cases (official testbench, Icarus)</h2>
 <table id="tbl"></table>
@@ -400,7 +456,9 @@ Set 3 reorders the loop (group → row tile → col tile in group → kk) so the
 const P=/*DATA*/null;
 for(const k in P.sets)for(const c in P.sets[k].waves){const w=P.sets[k].waves[c];
  for(const p in w.data){const f=w.data[p],o=[];let t=0;for(let i=0;i<f.length;i+=2){t+=f[i];o.push([t,f[i+1]])}w.data[p]=o}}
-const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];return c.startsWith('bench_')&&m?`${m.m}×${m.n}×${m.k} · lat ${m.lat} (realistic)`:c};
+const caseLabel=c=>{const m=P.metrics['s3_all|'+c]||P.metrics['baseline|'+c];if(!m)return c;
+ if(c.startsWith('demo'))return `demo ${m.m}×${m.n}×${m.k} (values)`;
+ return c.startsWith('bench')?`${m.m}×${m.n}×${m.k} · lat ${m.lat}`:c};
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SETNAMES=Object.fromEntries(P.order.map(k=>[k,P.sets[k].name]));
 let mode='all', kase=P.cases.find(c=>P.order.some(k=>P.sets[k].waves[c]));
@@ -530,7 +588,11 @@ function stats(){
  const w3=P.sets.s3_all.waves[kase];let setup=null;
  if(w3){const st=w3.data['tb_gemm.dut.control.state'];const i=st.findIndex(e=>e[1]===4);if(i>=0&&i+1<st.length)setup=st[i+1][0]-st[i][0]}
  const diff=m&&m2?(+m.cycles)-(+m2.cycles):null;
- document.getElementById('note').textContent=m&&+m.m>4?
+ document.getElementById('note').textContent=kase.startsWith('demo')?
+  `Demo case with values −3…3: A and B show every value (shade = how many times it was read from memory), C shows the partial sum each PE holds, `+
+  `bold when written out. The highlighted column of A × row of B is the packet mac_array just took. Step with "1 ▶" to follow one multiply-accumulate per packet. `+
+  `In Set 4 the four row tiles of a block (ACC 0–3) take turns on the same B row.`:
+  m&&+m.m>4?
   `What to watch: ${+m.m/4} row tiles × ${+m.n/4} col tiles × K=${m.k}. Set 2 fills its 16 KB B reuse buffer during row tile 0 and reads it for every later row tile. Set 3 fills its 4 KB reuse buffer during row tile 0 of each group of G=${Math.max(1,Math.min(+m.n/4,Math.floor((P.sets.s3_all.params.BBUF_DEPTH||1024)/+m.k)))} col tiles (the group range in gemm_control), then reuses it for the other row tiles. Baseline and Set 1 are far slower, so only their first cycles are recorded.`:
   m&&+m.m<=4?
   `Note: M=${m.m} fits in one row tile, so Set 3 has nothing to group (B is never reused across row tiles) and runs the same loop as Set 2. `+
@@ -579,11 +641,13 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',render);
 const NS='http://www.w3.org/2000/svg';
 const DESC={
  baseline:'One request at a time: fetch 4 A bytes, then 4 B bytes, one memory round-trip each, then hand the packet to the MAC. No reuse, no overlap.',
- s1_all:'A reuse buffer keeps each kk\'s A word from col tile 0 and replays it for later col tiles (blue flash = buffer read, orange = fill). All-zero A skips the B reads. Ping/Pong slots let the next packet load while the MAC holds the other — but still one memory request at a time.',
+ s1_all:'A reuse buffer keeps each kk\'s A word from col tile 0 and replays it for later col tiles (blue flash = buffer read, orange = fill). Ping/Pong slots let the next packet load while the MAC holds the other — but still one memory request at a time.',
  s2_all:'One memory request at a time (the memory contract). The A reuse buffer and the 16 KB B reuse buffer (filled during row tile 0) remove most reads, and 4 packet slots let packets that need no memory read line up behind one that does.',
- s3_all:'Same loader as Set 2, but gemm_control walks group → row tile → col tile in group → kk, so a 4 KB B reuse buffer holds G column tiles and is reused by every row tile of the group. SETUP picks G at start.'};
+ s3_all:'Same loader as Set 2, but gemm_control walks group → row tile → col tile in group → kk, so a 4 KB B reuse buffer holds G column tiles and is reused by every row tile of the group. SETUP picks G at start.',
+ s4_all:'gemm_control walks group → row block (4 row tiles) → col tile → kk → bank. mac_array keeps 4 ACC banks, so one B packet (bank 0) is reused by the other 3 banks without any read. Tiles are not written one by one: their C addresses wait in a FIFO, so reads continue while results are written.'};
 const COL={A:'#2563eb',B:'#ea580c',req:'#7c3aed',op:'#16a34a',out:'#0891b2',skip:'#9ca3af'};
-document.getElementById('legend').innerHTML=[['A request / A data',COL.A],['B request / B data',COL.B],['request from gemm_control',COL.req],['packet to MAC',COL.op],['result written',COL.out],['zero-skipped B',COL.skip]]
+const SLOTSETS=['s2_all','s3_all','s4_all'];
+document.getElementById('legend').innerHTML=[['A request / A data',COL.A],['B request / B data',COL.B],['request from gemm_control',COL.req],['packet to MAC',COL.op],['result written',COL.out],['B shared from bank 0 (Set 4)',COL.skip]]
  .map(([l,c])=>`<span><i style="background:${c}"></i>${l}</span>`).join('');
 let T=0,playing=false,last=null;const dgs={};
 function sa(e,k,v){if(typeof v==='string'&&v.startsWith('var(')&&(k==='fill'||k==='stroke')){e.removeAttribute(k);e.style[k]=v}else{if(k==='fill'||k==='stroke')e.style[k]='';e.setAttribute(k,v)}}
@@ -599,11 +663,13 @@ function prepAnim(set){
  ev.cst=d(Cp+'state');ev.row=d(Cp+'row');ev.col=d(Cp+'col');ev.kk=d(Cp+'kk');ev.lst=d(L+'state');ev.done=d('tb_gemm.dut.done');
  ev.aRd=new Int32Array(n);ev.bRd=new Int32Array(n);ev.aWr=new Int32Array(n);ev.bWr=new Int32Array(n);ev.skip=new Int32Array(n);
  if(set==='s1_all'){ev.full=d(L+'full');ev.wr=d(L+'wr');ev.rd=d(L+'rd');ev.aRd=and(d(L+'accept'),d(L+'hit_a'));ev.aWr=d(L+'aw_pend');
-  for(let c=0;c+1<n;c++)if(ev.lst[c]===1&&ev.lst[c+1]!==4)ev.skip[c]=1}         // A_BRD not followed by B_REQ = zero skip
- if(set==='s2_all'||set==='s3_all'){ev.alloc=d(L+'alloc');ev.prep=d(L+'prep');ev.rd=d(L+'rd');ev.oc=d(L+'busy_q');
-  const cv=d(L+'cap_v');ev.aRd=and(cv,d(L+'cap_hita'));ev.bRd=and(cv,d(L+'cap_hitb'));ev.skip=and(cv,d(L+'skip_b'));
+  }
+ if(SLOTSETS.includes(set)){ev.alloc=d(L+'alloc');ev.prep=d(L+'prep');ev.rd=d(L+'rd');ev.oc=d(L+'busy_q');
+  const cv=d(L+'cap_v');ev.aRd=and(cv,d(L+'cap_hita'));ev.bRd=and(cv,d(L+'cap_hitb'));
   ev.aWr=d(L+'aw_pend');ev.bWr=d(L+'bw_pend')}
- if(set==='s3_all'){ev.gs=d(Cp+'grp_start');ev.gw=d(Cp+'gw')}
+ if(set==='s3_all'||set==='s4_all'){ev.gs=d(Cp+'grp_start');ev.gw=d(Cp+'gw')}
+ if(set==='s4_all'){ev.rb=d(Cp+'rb');ev.bank=d('tb_gemm.dut.cbank');ev.fifo=d(Cp+'cnt');
+  ev.skip=ev.op.map((x,i)=>x&&ev.bank[i]>0?1:0)}                                 // packets that reuse bank 0's B
  // pair requests with (in-order) responses
  const q=[],reqs=[];for(let c=0;c<n;c++){if(ev.memRsp[c]&&q.length){q.shift().r=c}if(ev.memReq[c]){const o={q:c,b:ev.isB[c],r:null};q.push(o);reqs.push(o)}}
  const ad=d('tb_gemm.dut.mem_req_addr'),oa=d('tb_gemm.dut.out_addr');reqs.forEach(o=>o.a=ad[o.q]);
@@ -641,13 +707,13 @@ function buildDiagram(set){
   const mark=mk('text',{x:x+76,y:70,'font-size':10,'text-anchor':'end',fill:'var(--mute)'},svg,'');E.slots.push({r,t2,mark})}
  if(set!=='baseline'){E.ac=mk('rect',{x:235,y:128,width:180,height:62,rx:6,fill:'var(--grp)',stroke:'var(--line)','stroke-width':1.5},svg);
   mk('text',{x:245,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'A reuse buffer');
-  mk('text',{x:405,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.ABUF_DEPTH}×33 b`);
+  mk('text',{x:405,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.ABUF_DEPTH*4/1024} KB`);
   E.acT=mk('text',{x:245,y:176,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'')}
- if(set==='s2_all'||set==='s3_all'){E.bb=mk('rect',{x:425,y:128,width:180,height:62,rx:6,fill:'var(--grp)',stroke:'var(--line)','stroke-width':1.5},svg);
+ if(SLOTSETS.includes(set)){E.bb=mk('rect',{x:425,y:128,width:180,height:62,rx:6,fill:'var(--grp)',stroke:'var(--line)','stroke-width':1.5},svg);
   mk('text',{x:435,y:147,'font-size':12,'font-weight':600,fill:'var(--ink)'},svg,'B reuse buffer');
   mk('text',{x:595,y:147,'font-size':10.5,'text-anchor':'end',fill:'var(--mute)'},svg,`${pr.BBUF_DEPTH*4/1024} KB`);
   E.bbT=mk('text',{x:435,y:176,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'')}
- if(set==='s2_all'||set==='s3_all'){mk('text',{x:235,y:215,'font-size':11,fill:'var(--mute)'},svg,'memory request (one at a time)');
+ if(SLOTSETS.includes(set)){mk('text',{x:235,y:215,'font-size':11,fill:'var(--mute)'},svg,'memory request (one at a time)');
   E.tags=[mk('rect',{x:235,y:222,width:22,height:18,rx:3,fill:'var(--grp)'},svg)];
   E.ocT=mk('text',{x:266,y:236,'font-size':11,fill:'var(--ink)',class:'mono'},svg,'')}
  else{mk('text',{x:235,y:215,'font-size':11,fill:'var(--mute)'},svg,'loader FSM (one memory request at a time)');
@@ -660,6 +726,8 @@ function buildDiagram(set){
  // MAC + writer
  box(svg,660,185,150,130,'mac_array','4×4');E.mac=mk('rect',{x:675,y:212,width:120,height:60,rx:4,fill:'var(--grp)'},svg);
  for(let i=0;i<4;i++)for(let j=0;j<4;j++)mk('rect',{x:680+j*29,y:216+i*14,width:25,height:11,rx:2,fill:'var(--panel)',opacity:.8},svg);
+ if(set==='s4_all'){E.banks=[];for(let b=0;b<(pr.NBANK||4);b++){const r=mk('rect',{x:675+b*31,y:276,width:27,height:12,rx:2,fill:'var(--grp)',stroke:'var(--line)'},svg);
+  mk('text',{x:688.5+b*31,y:285.5,'font-size':8.5,'text-anchor':'middle',fill:'var(--ink)'},svg,'ACC'+b);E.banks.push(r)}}
  E.macT=mk('text',{x:675,y:300,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'');
  box(svg,835,185,150,130,'result_writer');E.wr=mk('rect',{x:850,y:212,width:120,height:60,rx:4,fill:'var(--grp)'},svg);
  E.wrT=mk('text',{x:850,y:300,'font-size':11,fill:'var(--mute)',class:'mono'},svg,'');
@@ -679,33 +747,56 @@ function mxInit(D){const X=D.mx,{M,N,K}=X;
  X.wc=new Float64Array(M*N).fill(Infinity);for(const [c,a] of D.ev.outs)if(a<M*N)X.wc[a]=Math.min(X.wc[a],c);
  const off=(w,h)=>{const o=document.createElement('canvas');o.width=w;o.height=h;return o};
  X.oA=off(K,M);X.oB=off(N,K);X.oC=off(N,M);
- // layout in CSS px: A | × | B | = | C   (rows of A/C = M, rows of B = K)
- const W=1000,H=320;const gap=46,top=34,bot=26;
- X.s=Math.min(28,(W-40-2*gap)/(K+2*N),(H-top-bot)/Math.max(M,K));
+ // values mode: small demo cases with a packet trace -> print every A, B value and C partial sum
+ X.vals=P.vals[kase];X.pkt=(P.sets[D.set].waves[kase]||{}).pkt;X.num=!!(X.vals&&X.pkt);
+ if(X.num){X.ps=new Int32Array(M*N);X.pt=new Uint8Array(M*N);X.pi=0}
+ // layout in canvas units: A | × | B | = | C   (rows of A/C = M, rows of B = K); units scale with the card width
+ const W=1000;const gap=46,top=34,bot=X.num?62:26;
+ X.s=Math.min(X.num?40:28,(W-40-2*gap)/(K+2*N),X.num?1e9:(320-top-bot)/Math.max(M,K));
  const s=X.s,used=s*(K+2*N)+2*gap;let x=(W-used)/2;
  X.A={x,y:top,w:K*s,h:M*s};x+=K*s+gap;X.B={x,y:top,w:N*s,h:K*s};x+=N*s+gap;X.C={x,y:top,w:N*s,h:M*s};
  X.W=W;X.H=top+Math.max(M,K)*s+bot}
 function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=P.sets[D.set].params;
  // fetch counts up to cycle c (incremental forward, rebuild on rewind)
- if(c<X.upto){X.cntA.fill(0);X.cntB.fill(0);X.ri=0}
+ if(c<X.upto){X.cntA.fill(0);X.cntB.fill(0);X.ri=0;if(X.num){X.ps.fill(0);X.pt.fill(0);X.pi=0}}
  const R=ev.reqs;while(X.ri<R.length&&R[X.ri].q<=c){const o=R[X.ri++];if(o.b){if(o.a<K*N)X.cntB[o.a]++}else if(o.a<M*K)X.cntA[o.a]++}X.upto=c;
+ // partial sums: replay every packet mac_array took up to cycle c (first = start the sum again)
+ let cur=null;
+ if(X.num){const Q=X.pkt;while(X.pi<Q.length&&Q[X.pi][0]<=c){const q=Q[X.pi++];const [,r0,kk,c0]=q,rows=q[12],cols=q[13];
+   for(let i=0;i<4;i++)for(let j=0;j<4;j++){if(!((rows>>i)&1)||!((cols>>j)&1))continue;const ix=(r0+i)*N+c0+j;
+    X.ps[ix]=(q[14]?0:X.ps[ix])+q[4+i]*q[8+j];X.pt[ix]=1}}
+  if(X.pi>0)cur=Q[X.pi-1]}
  const cv=X.cv,dpr=devicePixelRatio||1,cw=cv.clientWidth||1000,sc=cw/X.W;
- cv.style.height=(X.H*sc)+'px';if(cv.width!==Math.round(cw*dpr)){cv.width=Math.round(cw*dpr);cv.height=Math.round(X.H*sc*dpr)}
+ cv.style.height=(X.H*sc)+'px';if(cv.width!==Math.round(cw*dpr)||cv.height!==Math.round(X.H*sc*dpr)){cv.width=Math.round(cw*dpr);cv.height=Math.round(X.H*sc*dpr)}
  const g=cv.getContext('2d');g.setTransform(dpr*sc,0,0,dpr*sc,0,0);g.clearRect(0,0,X.W,X.H);g.imageSmoothingEnabled=false;
  const bg=rgb(css('--grid')),ink=css('--ink'),mute=css('--mute');
- // per-pixel loop without allocations; colour = bg blended toward col by alpha a(i)
  const paintImg=(o,w,h,col,src,amap)=>{if(!o._im)o._im=o.getContext('2d').createImageData(w,h);const d=o._im.data,n=w*h;
   const lut=[];for(let a=0;a<amap.length;a++)lut.push([bg[0]+(col[0]-bg[0])*amap[a],bg[1]+(col[1]-bg[1])*amap[a],bg[2]+(col[2]-bg[2])*amap[a]]);
   for(let i=0;i<n;i++){const L=lut[src(i)],j=4*i;d[j]=L[0];d[j+1]=L[1];d[j+2]=L[2];d[j+3]=255}o.getContext('2d').putImageData(o._im,0,0)};
  const AL=[0];for(let k=1;k<64;k++)AL.push(Math.min(.92,.3+.16*Math.log2(k)));
+ const AN=X.num?[0,.28,.42,.55,.65,.72,.78,.82].concat(Array(56).fill(.85)):AL;          // lighter shades so numbers stay readable
  const cA=X.cntA,cB=X.cntB,wc=X.wc;
- paintImg(X.oA,K,M,[37,99,235],i=>cA[i]<63?cA[i]:63,AL);paintImg(X.oB,N,K,[234,88,12],i=>cB[i]<63?cB[i]:63,AL);
- paintImg(X.oC,N,M,[22,163,74],i=>wc[i]<=c?1:0,[0,.75]);
+ paintImg(X.oA,K,M,[37,99,235],i=>cA[i]<63?cA[i]:63,AN);paintImg(X.oB,N,K,[234,88,12],i=>cB[i]<63?cB[i]:63,AN);
+ if(X.num)paintImg(X.oC,N,M,[22,163,74],i=>wc[i]<=c?2:X.pt[i]?1:0,[0,.18,.55]);
+ else paintImg(X.oC,N,M,[22,163,74],i=>wc[i]<=c?1:0,[0,.75]);
  for(const [o,r] of [[X.oA,X.A],[X.oB,X.B],[X.oC,X.C]])g.drawImage(o,r.x,r.y,r.w,r.h);
  const s=X.s;
  if(s>=6){g.strokeStyle=css('--panel');g.lineWidth=1;for(const [r,cols,rows] of [[X.A,K,M],[X.B,N,K],[X.C,N,M]]){g.beginPath();
   for(let i=1;i<cols;i++){g.moveTo(r.x+i*s,r.y);g.lineTo(r.x+i*s,r.y+r.h)}for(let j=1;j<rows;j++){g.moveTo(r.x,r.y+j*s);g.lineTo(r.x+r.w,r.y+j*s)}g.stroke()}}
+ // tile borders every 4 rows / columns
+ g.strokeStyle=mute;g.lineWidth=1;g.globalAlpha=.6;
+ for(const [r,cols,rows,ct,rt] of [[X.A,K,M,0,1],[X.B,N,K,1,0],[X.C,N,M,1,1]]){g.beginPath();
+  if(ct)for(let i=4;i<cols;i+=4){g.moveTo(r.x+i*s,r.y);g.lineTo(r.x+i*s,r.y+r.h)}
+  if(rt)for(let j=4;j<rows;j+=4){g.moveTo(r.x,r.y+j*s);g.lineTo(r.x+r.w,r.y+j*s)}g.stroke()}g.globalAlpha=1;
  for(const r of [X.A,X.B,X.C]){g.strokeStyle=css('--line');g.lineWidth=1;g.strokeRect(r.x,r.y,r.w,r.h)}
+ // numbers
+ if(X.num){const V=X.vals;g.textAlign='center';g.textBaseline='middle';const fs=Math.min(14,s*.42);
+  g.font=`${fs}px ui-monospace,Menlo,monospace`;g.fillStyle=ink;
+  for(let i=0;i<M;i++)for(let k=0;k<K;k++)g.fillText(V.a[i*K+k],X.A.x+(k+.5)*s,X.A.y+(i+.5)*s);
+  for(let k=0;k<K;k++)for(let j=0;j<N;j++)g.fillText(V.b[k*N+j],X.B.x+(j+.5)*s,X.B.y+(k+.5)*s);
+  for(let i=0;i<M;i++)for(let j=0;j<N;j++){const ix=i*N+j;if(!X.pt[ix]){g.fillStyle=mute;g.fillText('·',X.C.x+(j+.5)*s,X.C.y+(i+.5)*s);continue}
+   g.fillStyle=ink;g.font=`${wc[ix]<=c?'600 ':''}${fs}px ui-monospace,Menlo,monospace`;g.fillText(X.ps[ix],X.C.x+(j+.5)*s,X.C.y+(i+.5)*s)}
+  g.textAlign='left';g.textBaseline='alphabetic'}
  // labels
  g.font='600 12px -apple-system,sans-serif';g.fillStyle=ink;g.textBaseline='alphabetic';
  g.fillText(`A  (${M}×${K})`,X.A.x,X.A.y-8);g.fillText(`B  (${K}×${N})`,X.B.x,X.B.y-8);g.fillText(`C  (${M}×${N})`,X.C.x,X.C.y-8);
@@ -713,28 +804,38 @@ function mxDraw(D,t,c){const X=D.mx;if(!X)return;const {M,N,K}=X,ev=D.ev,pr=P.se
  g.fillText('×',X.A.x+X.A.w+16,my);g.fillText('=',X.B.x+X.B.w+16,my);
  // A reuse buffer / B reuse buffer regions (dashed)
  const row=ev.row[c],col=ev.col[c],kk=ev.kk[c];g.setLineDash([4,3]);g.lineWidth=1.5;
- if(D.set!=='baseline'){const dep=Math.min(K,pr.ABUF_DEPTH||1024);g.strokeStyle=COL.A;g.strokeRect(X.A.x-1.5,X.A.y+row*s-1.5,dep*s+3,Math.min(4,M-row)*s+3)}
- if(D.set==='s2_all'||D.set==='s3_all'){const dep=pr.BBUF_DEPTH||4096;g.strokeStyle=COL.B;
-  let c0=0,c1=N;if(D.set==='s3_all'&&ev.gw&&ev.gw[c]){c0=ev.gs[c];c1=Math.min(N,c0+ev.gw[c])}
+ if(D.set!=='baseline'){const blk=D.set==='s4_all'?4*(pr.NBANK||4):4,r0=D.set==='s4_all'?ev.rb[c]:row;
+  const dep=Math.min(K,Math.floor((pr.ABUF_DEPTH||1024)/(blk/4)));g.strokeStyle=COL.A;g.strokeRect(X.A.x-1.5,X.A.y+r0*s-1.5,dep*s+3,Math.min(blk,M-r0)*s+3)}
+ if(SLOTSETS.includes(D.set)){const dep=pr.BBUF_DEPTH||4096;g.strokeStyle=COL.B;
+  let c0=0,c1=N;if(ev.gw&&ev.gw[c]){c0=ev.gs[c];c1=Math.min(N,c0+ev.gw[c])}
   const full=Math.floor(dep/K),tiles=Math.ceil((c1-c0)/4);const ft=Math.min(tiles,full);
   if(ft>0)g.strokeRect(X.B.x+c0*s-1.5,X.B.y-1.5,Math.min(ft*4,c1-c0)*s+3,K*s+3);
   if(ft<tiles&&dep%K){g.strokeRect(X.B.x+(c0+ft*4)*s-1.5,X.B.y-1.5,Math.min(4,c1-c0-ft*4)*s+3,(dep%K)*s+3)}}
  g.setLineDash([]);
- // current position (what gemm_control is issuing)
- const busy=ev.cst[c]!==0;
- if(busy){const rr=Math.min(4,M-row),cc=Math.min(4,N-col);g.strokeStyle=ink;g.lineWidth=2;
+ const busy=ev.cst[c]!==0,yb=X.H-8;
+ if(X.num){
+  // the packet mac_array took most recently: C tile += A column (4 values) × B row (4 values)
+  if(cur){const [cc,r0,k0,c0]=cur,rr=Math.min(4,M-r0),nc=Math.min(4,N-c0),fresh=c-cc<=1;g.strokeStyle=fresh?COL.op:ink;g.lineWidth=fresh?3:2;
+   g.strokeRect(X.A.x+k0*s,X.A.y+r0*s,s,rr*s);g.strokeRect(X.B.x+c0*s,X.B.y+k0*s,nc*s,s);g.strokeRect(X.C.x+c0*s,X.C.y+r0*s,nc*s,rr*s);
+   g.font='12px ui-monospace,Menlo,monospace';g.fillStyle=ink;
+   const av=cur.slice(4,4+rr).join(', '),bv=cur.slice(8,8+nc).join(', ');
+   g.fillText(`MAC (cycle ${cc}${cur[14]?', first':''}${cur[15]?', last':''}${ev.bank?`, ACC bank ${ev.bank[cc]}`:''}):  C[${r0}..${r0+rr-1}][${c0}..${c0+nc-1}] ${cur[14]?'=':'+='} A[${r0}..${r0+rr-1}][k=${k0}] (${av})  ×  B[k=${k0}][${c0}..${c0+nc-1}] (${bv})`,X.A.x,yb-30)}
+  else{g.font='12px ui-monospace,Menlo,monospace';g.fillStyle=mute;g.fillText('MAC: no packet yet',X.A.x,yb-30)}
+ }else if(busy){const rr=Math.min(4,M-row),cc=Math.min(4,N-col);g.strokeStyle=ink;g.lineWidth=2;   // what gemm_control is issuing
   g.strokeRect(X.A.x+kk*s,X.A.y+row*s,Math.max(s,2),rr*s);g.strokeRect(X.B.x+col*s,X.B.y+kk*s,cc*s,Math.max(s,2));
   g.strokeRect(X.C.x+col*s,X.C.y+row*s,cc*s,rr*s);g.globalAlpha=.25;g.fillStyle=ink;
   g.fillRect(X.A.x,X.A.y+row*s,K*s,rr*s);g.fillRect(X.B.x+col*s,X.B.y,cc*s,K*s);g.globalAlpha=1}
  // requests in flight: exact elements
  for(const o of inFlight(ev,c)){
-  const r=o.b?X.B:X.A,w=o.b?N:K,ri=Math.floor(o.a/w),ci=o.a%w,z=Math.max(s,3);
-  g.fillStyle=o.b?COL.B:COL.A;g.fillRect(r.x+ci*s-(z-s)/2,r.y+ri*s-(z-s)/2,z,z)}
+  const r=o.b?X.B:X.A,w=o.b?N:K,ri=Math.floor(o.a/w),ci=o.a%w;
+  if(X.num){g.strokeStyle=o.b?COL.B:COL.A;g.lineWidth=3;g.strokeRect(r.x+ci*s+1.5,r.y+ri*s+1.5,s-3,s-3)}
+  else{const z=Math.max(s,3);g.fillStyle=o.b?COL.B:COL.A;g.fillRect(r.x+ci*s-(z-s)/2,r.y+ri*s-(z-s)/2,z,z)}}
  // caption
- g.font='11px -apple-system,sans-serif';g.fillStyle=mute;const yb=X.H-8;
+ g.font='11px -apple-system,sans-serif';g.fillStyle=mute;
  g.fillText(busy?`issuing: A rows ${row}–${row+Math.min(4,M-row)-1}, k=${kk}  ×  B k=${kk}, cols ${col}–${col+Math.min(4,N-col)-1}  →  C tile (${row}, ${col})`:'idle',X.A.x,yb);
  let lx=X.C.x+X.C.w;g.textAlign='right';
- g.fillText(`shade = times fetched from memory · dashed = ${D.set==='baseline'?'—':D.set==='s1_all'?'A reuse buffer':'A reuse buffer / B reuse buffer'} · green = C written (${ev.cOut[c]}/${M*N})`,lx,yb);g.textAlign='left'}
+ g.fillText(X.num?`shade = times read from memory (box = request in flight) · C: light = partial sum, dark/bold = written (${ev.cOut[c]}/${M*N})`:
+  `shade = times fetched from memory · dashed = ${D.set==='baseline'?'—':D.set==='s1_all'?'A reuse buffer':'A reuse buffer / B reuse buffer'} · green = C written (${ev.cOut[c]}/${M*N})`,lx,X.num?yb-15:yb);g.textAlign='left'}
 function tok(a,on,p,col){if(!on){a.t.setAttribute('opacity',0);sa(a.p,'stroke','var(--line)');return}
  if(a.len==null)a.len=a.p.getTotalLength();const pt=a.p.getPointAtLength(a.len*Math.min(1,p));a.t.setAttribute('cx',pt.x);a.t.setAttribute('cy',pt.y);
  sa(a.t,'fill',col);a.t.setAttribute('opacity',1);sa(a.p,'stroke',col)}
@@ -747,7 +848,7 @@ function update(D,t,prevT){
  const st=P.sets[D.set].signals.find(s=>s.label==='control.state');const nm=v=>(st&&st.enum&&st.enum[v])||v;
  E.cst.textContent=nm(ev.cst[c]);E.pos.textContent=`row ${ev.row[c]}  col ${ev.col[c]}  kk ${ev.kk[c]}`;
  if(ev.gs)E.grp.textContent=ev.gw[c]?`group cols ${ev.gs[c]}–${ev.gs[c]+ev.gw[c]-1}`:'';
- E.reqs.textContent=`packets sent ${ev.cOp[c]}`;
+ E.reqs.textContent=`packets sent ${ev.cOp[c]}`+(ev.rb?` · block ${ev.rb[c]}`:'');
  // tokens
  const f=(arr)=>{const k=anyIn(arr,c0,c);return k};
  let k=f(ev.reqIn);tok(E.aReq,k>=0,k===c?p:1,COL.req);
@@ -777,7 +878,8 @@ function update(D,t,prevT){
  if(E.bbT)E.bbT.textContent=`reads ${ev.cBRd[c]}  ${bR?'◀ read':bW?'▶ fill':''}`;
  if(E.tags){const oc=ev.oc[c];sa(E.tags[0],'fill',oc?COL.req:'var(--grp)');E.ocT.textContent=oc?'waiting for the response':'no request outstanding'}
  if(E.lst){const ls=P.sets[D.set].signals.find(s=>s.label==='loader.state');E.lst.textContent=(ls&&ls.enum[ev.lst[c]])||ev.lst[c]}
- E.skipT.textContent=ev.cSkip[c]?`zero-skipped packets (B reads saved) ${ev.cSkip[c]}${anyIn(ev.skip,c0,c)>=0?'  ●':''}`:'';
+ E.skipT.textContent=D.set==='s4_all'?`packets with B shared from bank 0 (no B read): ${ev.cSkip[c]}${anyIn(ev.skip,c0,c)>=0?'  ●':''}   ·   results waiting in FIFO: ${ev.fifo[c]}`:'';
+ if(E.banks){const k=anyIn(ev.op,c0,c);E.banks.forEach((r,b)=>{sa(r,'fill',k>=0&&ev.bank[k]===b?COL.op:'var(--grp)')})}
  sa(E.mac,'fill',anyIn(ev.op,c0,c)>=0?COL.op:'var(--grp)');E.mac.setAttribute('fill-opacity',.45);
  sa(E.wr,'fill',anyIn(ev.out,c0,c)>=0?COL.out:'var(--grp)');E.wr.setAttribute('fill-opacity',.45);
  E.macT.textContent=`packets ${ev.cOp[c]}`;E.wrT.textContent=`outputs ${ev.cOut[c]}`;
@@ -808,13 +910,16 @@ document.getElementById('scrub').oninput=e=>{const prev=T;T=+e.target.value;pain
 document.getElementById('stepF').onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';const prev=T;T=Math.floor(T)+1;paint(T+.5,T-.5);T+=.5};
 document.getElementById('stepB').onclick=()=>{playing=false;document.getElementById('play').textContent='▶ Play';T=Math.max(0,Math.floor(T)-1);paint(T+.5,T-.5);T+=.5};
 const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
-let dgCols=+(store.get('dgCols')||2);
-function setCols(k){dgCols=k;store.set('dgCols',k);document.getElementById('diagrams').style.setProperty('--dgcols',Math.max(1,Math.min(k,Object.keys(dgs).length)));
+// diagram card width in CSS px: browser zoom scales it like everything else (Cmd − fits more per row)
+const DGW={1:1400,2:760,3:540,4:420};let dgCols=+(store.get('dgCols')||2);if(!DGW[dgCols])dgCols=2;
+function setCols(k){dgCols=k;store.set('dgCols',k);document.getElementById('diagrams').style.setProperty('--dgw',DGW[k]+'px');
  document.getElementById('dgSize').querySelectorAll('button').forEach(b=>b.className=+b.dataset.k===k?'on':'');
  requestAnimationFrame(()=>paint(T,T-.001))}
 (()=>{const el=document.getElementById('dgSize');for(const [k,l] of [[1,'Large'],[2,'Medium'],[3,'Small'],[4,'Tiny']]){
- const b=document.createElement('button');b.textContent=l;b.dataset.k=k;b.title=k+' per row';b.onclick=()=>setCols(k);el.appendChild(b)}})();
-window.addEventListener('resize',()=>paint(T,T-.001));
+ const b=document.createElement('button');b.textContent=l;b.dataset.k=k;b.title=DGW[k]+' px wide';b.onclick=()=>setCols(k);el.appendChild(b)}})();
+// zoom changes the window's CSS size and devicePixelRatio: redraw canvases sharp at the new scale
+let rz=null;window.addEventListener('resize',()=>{cancelAnimationFrame(rz);rz=requestAnimationFrame(()=>{
+ for(const k in dgs)if(dgs[k].mx)dgs[k].mx.upto=1e18;paint(T,T-.001)})});
 const _render=render;render=function(){_render();T=0;buildDiagrams();setCols(dgCols)};
 table();render();
 </script></body></html>
