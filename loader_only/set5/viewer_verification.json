@@ -1,0 +1,10 @@
+{
+  "runs": 6,
+  "checks": [
+    "read values and full order",
+    "MAC order and operands",
+    "first/last",
+    "C partial sum reconstruction",
+    "all C writes"
+  ]
+}

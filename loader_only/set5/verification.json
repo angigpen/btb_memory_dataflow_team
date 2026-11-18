@@ -1,0 +1,14 @@
+{
+  "variants": 6,
+  "result_rows": 282,
+  "checks": [
+    "C exact equality",
+    "handshake stability",
+    "full external read order",
+    "stalls",
+    "reset/restart",
+    "K/M/N tails",
+    "K=1024",
+    "buffer groups and A overflow"
+  ]
+}

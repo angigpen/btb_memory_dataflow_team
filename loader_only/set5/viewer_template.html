@@ -1,0 +1,103 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Set 5 · 실제 읽기 순서</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#20334a;font:16px/1.6 system-ui,sans-serif}main{max-width:1280px;margin:auto;padding:28px 20px}h1{font-size:30px;margin:0 0 10px}p{color:#5e7086;margin:8px 0}.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0}button,select{font:inherit;border:1px solid #b6c2d2;background:#fff;border-radius:7px;padding:7px 12px;color:inherit;cursor:pointer}button:disabled{opacity:.4;cursor:default}#play{background:#2f689f;color:white}input[type=range]{flex:1;min-width:200px;accent-color:#316ca7}.boards{display:flex;gap:24px;align-items:flex-start;overflow:auto;padding:10px 0}.board{flex-shrink:0}h2{font-size:21px;margin:10px 0}table{border-collapse:separate;border-spacing:2px}td{min-width:29px;height:29px;text-align:center;background:#e0e7f0;font:13px ui-monospace,monospace}th{font-size:10px;font-weight:400;color:#71839b;width:20px}.A{background:#b7d6fa}.B{background:#ffdaa1}.C{background:#b8e2cd}.now{outline:2px solid #274d7b;outline-offset:-2px}.written{box-shadow:inset 0 -3px #258162}.legend{display:flex;gap:20px;flex-wrap:wrap;color:#5e7086;font-size:13px}.legend span:before{content:'';display:inline-block;width:16px;height:16px;margin-right:6px;vertical-align:middle;background:var(--color)}.stats{font-variant-numeric:tabular-nums;font-weight:650;min-height:28px}.packet{padding:12px 0;font:14px ui-monospace,monospace;min-height:40px}.note{font-size:13px}.summary{font-size:13px;overflow:auto}.summary table{border-collapse:collapse}.summary td,.summary th{background:transparent;padding:6px 10px;font:inherit;border-bottom:1px solid #d3dce7;text-align:right;white-space:nowrap}.summary td:first-child{text-align:left}#guide{min-height:52px}a{color:#2f689f}
+</style>
+<main><h1>Set 5 · 행렬 읽기 순서</h1>
+<p>이카루스로 실행한 A 20×6, B 6×12의 실제 기록입니다. 외부 읽기는 응답 수락 시점, MAC은 입력 수락 시점입니다.</p>
+<div class="bar">
+<label>안 <select id="plan"><option value="1">1 · B 한 패킷 → A</option><option value="2">2 · B 가로 4줄 → A</option><option value="3">3 · B 세로 4열 → A</option></select></label>
+<label>ACC <select id="banks"><option value="2">2세트</option><option value="4" selected>4세트</option></select></label>
+<label>이동 단위 <select id="mode"><option value="read">외부 읽기</option><option value="op">MAC 패킷</option><option value="all">읽기 + MAC + C 기록</option></select></label>
+</div>
+<p id="guide"></p>
+<div class="bar"><button id="prev">이전</button><button id="play">재생</button><button id="next">다음</button><input id="seek" type="range" min="0" value="0" aria-label="실행 단계"></div>
+<div id="stats" class="stats"></div><div id="packet" class="packet"></div>
+<div class="boards" id="boards"></div>
+<div class="legend"><span style="--color:#b7d6fa">A</span><span style="--color:#ffdaa1">B</span><span style="--color:#b8e2cd">C 부분합</span><span style="--color:#e0e7f0">아직 사용 전</span></div>
+<p class="note">진한 테두리는 현재 이벤트가 사용하는 칸입니다. C의 녹색 밑줄은 외부 기록까지 완료된 칸입니다. 재사용된 A·B는 외부 읽기 횟수에 다시 포함되지 않습니다.</p>
+<div class="summary"><h2>이 예제의 실행 결과</h2><table><thead><tr><th>안</th><th>ACC</th><th>전체 사이클</th><th>A 외부 읽기</th><th>B 외부 읽기</th></tr></thead><tbody id="results"></tbody></table></div>
+<p class="note">2·3안은 B를 모으는 임시 공간 16 B를 추가합니다. 기존 A/B RAM과 패킷 슬롯은 유지합니다. 이 HTML은 읽기 스케줄을 검증한 결과이며, 별도 B 입력을 통한 조기 N:4 처리 경로는 포함하지 않습니다.</p>
+<script>
+'use strict';
+const P=/*DATA*/null;
+const $=id=>document.getElementById(id);
+const guides={
+  1:'같은 k의 B 가로 4개를 먼저 받은 뒤, ACC별 A 세로 4개를 가져옵니다. 이후 다음 k로 넘어갑니다.',
+  2:'B를 k=0~3의 가로줄 순서로 최대 16개 먼저 받습니다. 이후 k마다 ACC별 A를 가져옵니다. 마지막 K 묶음은 유효한 값만 받습니다.',
+  3:'B를 같은 열의 k=0~3 순서로 최대 16개 먼저 받습니다. 이후 A는 2안과 같은 순서로 가져옵니다.'
+};
+let run,stops=[],position=0,timer=null;
+function stop(){if(timer!==null)clearInterval(timer);timer=null;$('play').textContent='재생'}
+function select(){
+ stop();run=P.runs.find(r=>r.plan===+$('plan').value&&r.banks===+$('banks').value);
+ stops=run.events.map((e,i)=>({e,i})).filter(({e})=>$('mode').value==='all'||e.type===$('mode').value).map(({i})=>i);
+ position=0;$('seek').max=stops.length;$('guide').textContent=guides[run.plan];draw();
+}
+function stateAt(index){
+ const a=new Map(),b=new Map(),c=new Map(),written=new Set();
+ let readsA=0,readsB=0,ops=0,lastOp=null;
+ for(let i=0;i<=index;i++){
+  const e=run.events[i];
+  if(e.type==='read'){
+   if(e.is_b){readsB++;b.set(e.addr,e.value)}else{readsA++;a.set(e.addr,e.value)}
+  }else if(e.type==='op'){
+   ops++;lastOp=e;
+   for(let r=0;r<4;r++){
+    const row=e.row+r;a.set(row*P.k+e.k,e.a[r]);
+    for(let j=0;j<4;j++){
+     const col=e.col+j;b.set(e.k*P.n+col,e.b[j]);
+     const addr=row*P.n+col;
+     c.set(addr,(e.first?0:c.get(addr)||0)+e.a[r]*e.b[j]);
+    }
+   }
+  }else{written.add(e.addr);if(c.get(e.addr)!==e.value)throw Error('C trace mismatch')}
+ }
+ return {a,b,c,written,readsA,readsB,ops,lastOp};
+}
+function board(kind,rows,cols,values,hot,written){
+ let h='<section class="board"><h2>'+kind+' · '+rows+'×'+cols+'</h2><table><tr><th></th>';
+ for(let j=0;j<cols;j++)h+='<th>'+j+'</th>';h+='</tr>';
+ for(let i=0;i<rows;i++){
+  h+='<tr><th>'+i+'</th>';
+  for(let j=0;j<cols;j++){
+   const addr=i*cols+j,known=values.has(addr);
+   h+='<td class="'+(known?kind:'')+(hot.has(addr)?' now':'')+(written?.has(addr)?' written':'')+'">'+(known?values.get(addr):'·')+'</td>';
+  }
+  h+='</tr>';
+ }
+ return h+'</table></section>';
+}
+function draw(){
+ $('seek').value=position;
+ const idx=position?stops[position-1]:-1;
+ const state=stateAt(idx),e=run.events[idx],hot={a:new Set(),b:new Set(),c:new Set()};
+ let detail='재생을 시작하세요.';
+ if(e?.type==='read'){
+  (e.is_b?hot.b:hot.a).add(e.addr);
+  const cols=e.is_b?P.n:P.k;
+  detail=(e.is_b?'B':'A')+'['+Math.floor(e.addr/cols)+','+e.addr%cols+'] = '+e.value+' · 외부 메모리 응답';
+ }else if(e?.type==='op'){
+  for(let i=0;i<4;i++){
+   hot.a.add((e.row+i)*P.k+e.k);
+   for(let j=0;j<4;j++){hot.b.add(e.k*P.n+e.col+j);hot.c.add((e.row+i)*P.n+e.col+j)}
+  }
+  detail='ACC '+e.bank+' · row '+e.row+' · col '+e.col+' · k='+e.k+' · op_a=['+e.a.join(', ')+'] · op_b=['+e.b.join(', ')+']';
+ }else if(e?.type==='write'){hot.c.add(e.addr);detail='C['+Math.floor(e.addr/P.n)+','+e.addr%P.n+'] = '+e.value+' · 외부 기록 완료'}
+ $('stats').textContent='단계 '+position+'/'+stops.length+' · clock '+(e?.cycle??0)+' · MAC '+state.ops+'/90 · A reads '+state.readsA+' / B reads '+state.readsB;
+ $('packet').textContent=e?detail:'재생이나 다음을 눌러 시작하세요.';
+ $('boards').innerHTML=board('A',P.m,P.k,state.a,hot.a)+board('B',P.k,P.n,state.b,hot.b)+board('C',P.m,P.n,state.c,hot.c,state.written);
+ $('prev').disabled=position===0;$('next').disabled=position===stops.length;
+}
+function advance(delta){position=Math.max(0,Math.min(stops.length,position+delta));draw()}
+for(const id of ['plan','banks','mode'])$(id).onchange=select;
+$('prev').onclick=()=>{stop();advance(-1)};$('next').onclick=()=>{stop();advance(1)};
+$('seek').oninput=e=>{stop();position=+e.target.value;draw()};
+$('play').onclick=()=>{
+ if(timer!==null){stop();return}if(position===stops.length)position=0;
+ $('play').textContent='일시 정지';
+ timer=setInterval(()=>{advance(1);if(position===stops.length)stop()},280);
+};
+$('results').innerHTML=P.runs.map(r=>'<tr><td>'+r.plan+'</td><td>'+r.banks+'</td><td>'+r.metrics.cycles+'</td><td>'+r.metrics.a_reads+'</td><td>'+r.metrics.b_reads+'</td></tr>').join('');
+select();
+</script></main></html>

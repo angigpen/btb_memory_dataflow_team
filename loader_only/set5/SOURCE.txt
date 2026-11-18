@@ -1,0 +1,3 @@
+Upstream https://github.com/angigpen/btb_memory_dataflow_team
+Commit bd5868e3491e4696f958ca4a24b15edd7e2eb0fb
+Plan 1: B-first packet. Plan 2: K-major 4x4 B gather. Plan 3: column-major 4x4 B gather.
