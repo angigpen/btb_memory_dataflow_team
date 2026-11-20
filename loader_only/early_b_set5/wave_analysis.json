@@ -1,0 +1,428 @@
+{
+  "plan1_acc2": {
+    "nm20_2of4": {
+      "vcd_cycles": 938,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 18,
+        "mode_before_a_groups": 4,
+        "first_b_mode_vcd_cycle": 122,
+        "first_a_request_vcd_cycle": 23,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm_tail": {
+      "vcd_cycles": 1479,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 24,
+        "mode_before_a_groups": 6,
+        "first_b_mode_vcd_cycle": 194,
+        "first_a_request_vcd_cycle": 36,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 933,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 18,
+        "mode_before_a_groups": 4,
+        "first_b_mode_vcd_cycle": 122,
+        "first_a_request_vcd_cycle": 23,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    }
+  },
+  "plan1_acc4": {
+    "nm20_2of4": {
+      "vcd_cycles": 907,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 2,
+        "first_b_mode_vcd_cycle": 194,
+        "first_a_request_vcd_cycle": 23,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm_tail": {
+      "vcd_cycles": 1523,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 2,
+        "first_b_mode_vcd_cycle": 302,
+        "first_a_request_vcd_cycle": 36,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 906,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 2,
+        "first_b_mode_vcd_cycle": 194,
+        "first_a_request_vcd_cycle": 23,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    }
+  },
+  "plan2_acc2": {
+    "nm20_2of4": {
+      "vcd_cycles": 957,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 18,
+        "mode_before_a_groups": 18,
+        "first_b_mode_vcd_cycle": 50,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm_tail": {
+      "vcd_cycles": 1525,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 24,
+        "mode_before_a_groups": 24,
+        "first_b_mode_vcd_cycle": 80,
+        "first_a_request_vcd_cycle": 96,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 954,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 18,
+        "mode_before_a_groups": 18,
+        "first_b_mode_vcd_cycle": 50,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    }
+  },
+  "plan2_acc4": {
+    "nm20_2of4": {
+      "vcd_cycles": 921,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 12,
+        "first_b_mode_vcd_cycle": 50,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm_tail": {
+      "vcd_cycles": 1519,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 12,
+        "first_b_mode_vcd_cycle": 80,
+        "first_a_request_vcd_cycle": 96,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 920,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 12,
+        "first_b_mode_vcd_cycle": 50,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    }
+  },
+  "plan3_acc2": {
+    "nm20_2of4": {
+      "vcd_cycles": 957,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 18,
+        "mode_before_a_groups": 18,
+        "first_b_mode_vcd_cycle": 23,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm_tail": {
+      "vcd_cycles": 1525,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 24,
+        "mode_before_a_groups": 24,
+        "first_b_mode_vcd_cycle": 35,
+        "first_a_request_vcd_cycle": 96,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 954,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 18,
+        "mode_before_a_groups": 18,
+        "first_b_mode_vcd_cycle": 23,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    }
+  },
+  "plan3_acc4": {
+    "nm20_2of4": {
+      "vcd_cycles": 921,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 12,
+        "first_b_mode_vcd_cycle": 23,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm_tail": {
+      "vcd_cycles": 1519,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 12,
+        "first_b_mode_vcd_cycle": 35,
+        "first_a_request_vcd_cycle": 96,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 920,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ],
+      "early_b": {
+        "groups": 12,
+        "mode_before_a_groups": 12,
+        "first_b_mode_vcd_cycle": 23,
+        "first_a_request_vcd_cycle": 59,
+        "checks": [
+          "every received B coordinate classified exactly once",
+          "registered N:4 modes match independent byte model",
+          "B and A channels accepted independently"
+        ]
+      }
+    }
+  }
+}

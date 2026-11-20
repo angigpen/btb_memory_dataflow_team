@@ -1,0 +1,2 @@
+input_packets,compute_packets,group_events,mixed_k_packets,frontend_stall,mac_stall,memory_wait,mul,pass,neg,shift,ram_accesses,classify_values,payload_toggles,first_b_cycle,first_b_mode_cycle,first_b_full_cycle,first_a_cycle,first_a_full_cycle,first_compute_cycle,early_mode_groups,b_before_a_groups
+120,60,30,60,0,97,256,380,100,112,332,168,192,4140,9,46,55,67,248,248,12,12

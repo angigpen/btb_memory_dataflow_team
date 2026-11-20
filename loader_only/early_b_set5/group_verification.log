@@ -1,0 +1,13 @@
+PASS plan1_acc2 A depth8 / B depth 8
+PASS plan1_acc2 A depth8 / B depth 16
+PASS plan1_acc4 A depth8 / B depth 8
+PASS plan1_acc4 A depth8 / B depth 16
+PASS plan2_acc2 A depth8 / B depth 8
+PASS plan2_acc2 A depth8 / B depth 16
+PASS plan2_acc4 A depth8 / B depth 8
+PASS plan2_acc4 A depth8 / B depth 16
+PASS plan3_acc2 A depth8 / B depth 8
+PASS plan3_acc2 A depth8 / B depth 16
+PASS plan3_acc4 A depth8 / B depth 8
+PASS plan3_acc4 A depth8 / B depth 16
+ALL PASS 12 small-cache cases

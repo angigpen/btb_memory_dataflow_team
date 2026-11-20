@@ -1,0 +1,4 @@
+VCD info: dumpfile wave.vcd opened for output.
+PASS run=0 M=27 N=11 K=7 cycles=1515 MACs=988
+GEMM REGRESSION PASS
+/Users/mingyukim/Documents/ChatGPT/btb 세미나/btb_memory_dataflow_team/loader_only/early_b_set5/build/plan2_acc2/tb.sv:206: $finish called at 15250000 (1ps)
