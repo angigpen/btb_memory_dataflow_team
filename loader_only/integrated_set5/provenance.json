@@ -1,0 +1,73 @@
+{
+  "memory_commit": "f0bd24f62b54ce5adfdb85c8f9ac328698f7f1b9",
+  "sparsity_commit": "259d931324f16d8814141e72430e3f6f6ddf1420",
+  "compute_commit": "4a9ac6d695f441915b7061323e66a20133903491",
+  "changes": [
+    "Compute REUSE is exposed as a parameter to instantiate 2 or 4 actual ACC sets.",
+    "Top connects bank-aware frontend, K-major A128, B/tag/K indices to compute. PE folding=0."
+  ],
+  "files": {
+    "plan1_acc2": {
+      "gemm_control.v": "529ef1408e3d2563d8542875b3f8ceb6b34dcb3b3114cba8995fc761eb635faf",
+      "gemm_top.v": "3fc84c2d4355f6ef9a51d8fe4b727bd22a2513401d6249fe19de0439245f50ec",
+      "mac_array_compute_nm.v": "1a68daa09362b00121663003c9df5b80f3ece90110b2a8c3ba96e760a3047d53",
+      "result_writer.v": "2c21b9c4d235a3f75cd8930398aa48641cc32df47a08e927c76fbe65ea122bda",
+      "operand_loader.v": "0b6f39d343a16e8b78f1b09beb4e7ecf2cea551383130d21c2c9b11ed1fc4b35",
+      "sparsity_frontend.v": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    },
+    "plan1_acc4": {
+      "gemm_control.v": "137751ee95681341b2867fd5230883399adb2c1b4da9859d8980bb64fa33b6e8",
+      "gemm_top.v": "cdc400dfca62b3fb967513b00b6e6a688f398ffe6dfb0a5b4ec300e4cde10f7d",
+      "mac_array_compute_nm.v": "210256cf04791a7df55bda723e1af99d0a036f2cd3977d986a5427bc8420f237",
+      "result_writer.v": "2c21b9c4d235a3f75cd8930398aa48641cc32df47a08e927c76fbe65ea122bda",
+      "operand_loader.v": "f9e7e20c7fe18653be6fd2fb4bfd5d84f214cefc43019e59f178e21726077234",
+      "sparsity_frontend.v": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    },
+    "plan2_acc2": {
+      "gemm_control.v": "529ef1408e3d2563d8542875b3f8ceb6b34dcb3b3114cba8995fc761eb635faf",
+      "gemm_top.v": "a0a113a26f5b65efed9a3d5be2fd984f026a708bf6413c63634b9a1045511c1b",
+      "mac_array_compute_nm.v": "1a68daa09362b00121663003c9df5b80f3ece90110b2a8c3ba96e760a3047d53",
+      "result_writer.v": "2c21b9c4d235a3f75cd8930398aa48641cc32df47a08e927c76fbe65ea122bda",
+      "operand_loader.v": "f6b589ad81dbf42cde2ab8b4aa583a48cab3e8901c9fb636b00a3eae5267846b",
+      "sparsity_frontend.v": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    },
+    "plan2_acc4": {
+      "gemm_control.v": "137751ee95681341b2867fd5230883399adb2c1b4da9859d8980bb64fa33b6e8",
+      "gemm_top.v": "5b3b47a9f30fd3de23e62c29907d9676b5eae55027b9ef89c7ee3d98a620112f",
+      "mac_array_compute_nm.v": "210256cf04791a7df55bda723e1af99d0a036f2cd3977d986a5427bc8420f237",
+      "result_writer.v": "2c21b9c4d235a3f75cd8930398aa48641cc32df47a08e927c76fbe65ea122bda",
+      "operand_loader.v": "e9b3607b9f103981484f9f5ea0f87c089d4015913360af47ae6a5d9a030b3f26",
+      "sparsity_frontend.v": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    },
+    "plan3_acc2": {
+      "gemm_control.v": "529ef1408e3d2563d8542875b3f8ceb6b34dcb3b3114cba8995fc761eb635faf",
+      "gemm_top.v": "ce7186191f65bb22d21a5b384adc6aec84d70bffa32989ca0449064a1b5dfe44",
+      "mac_array_compute_nm.v": "1a68daa09362b00121663003c9df5b80f3ece90110b2a8c3ba96e760a3047d53",
+      "result_writer.v": "2c21b9c4d235a3f75cd8930398aa48641cc32df47a08e927c76fbe65ea122bda",
+      "operand_loader.v": "f6b589ad81dbf42cde2ab8b4aa583a48cab3e8901c9fb636b00a3eae5267846b",
+      "sparsity_frontend.v": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    },
+    "plan3_acc4": {
+      "gemm_control.v": "137751ee95681341b2867fd5230883399adb2c1b4da9859d8980bb64fa33b6e8",
+      "gemm_top.v": "1140b90a960314c53a894060828b55a4472264b002a84b58b2875f28c5b54fe3",
+      "mac_array_compute_nm.v": "210256cf04791a7df55bda723e1af99d0a036f2cd3977d986a5427bc8420f237",
+      "result_writer.v": "2c21b9c4d235a3f75cd8930398aa48641cc32df47a08e927c76fbe65ea122bda",
+      "operand_loader.v": "e9b3607b9f103981484f9f5ea0f87c089d4015913360af47ae6a5d9a030b3f26",
+      "sparsity_frontend.v": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    }
+  },
+  "upstream_files": {
+    "sparsity_frontend": {
+      "path": "Sparsity_SET5_NM_Final_GitHub/Sparsity_SET5_NM_Final/rtl/sparsity_frontend.v",
+      "sha256": "dbdb0d679d18671a129ace19fa541dda7a5c1264fbd6306d62f38720dee716fb"
+    },
+    "nm_compute": {
+      "path": "NM/rtl/mac_array_compute_nm.v",
+      "sha256": "4b604b234f67a2daf5880b56f1fd5c557dc509fd03ef8d40c00352631d4590e5"
+    },
+    "top_wiring_reference": {
+      "path": "Sparsity_SET5_NM_Final_GitHub/Sparsity_SET5_NM_Final/rtl/gemm_top.v",
+      "sha256": "3c16b2104fef578c8e10c8d379185c2432ec5fb4315a3815e6dba41dd1605d3d"
+    }
+  }
+}

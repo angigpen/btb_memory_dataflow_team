@@ -1,0 +1,230 @@
+{
+  "plan1_acc2": {
+    "nm20_2of4": {
+      "vcd_cycles": 891,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm_tail": {
+      "vcd_cycles": 1435,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 888,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    }
+  },
+  "plan1_acc4": {
+    "nm20_2of4": {
+      "vcd_cycles": 890,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm_tail": {
+      "vcd_cycles": 1504,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 889,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    }
+  },
+  "plan2_acc2": {
+    "nm20_2of4": {
+      "vcd_cycles": 1403,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm_tail": {
+      "vcd_cycles": 1981,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 1400,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    }
+  },
+  "plan2_acc4": {
+    "nm20_2of4": {
+      "vcd_cycles": 1402,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm_tail": {
+      "vcd_cycles": 2060,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 1401,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    }
+  },
+  "plan3_acc2": {
+    "nm20_2of4": {
+      "vcd_cycles": 1403,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm_tail": {
+      "vcd_cycles": 1981,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 1400,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    }
+  },
+  "plan3_acc4": {
+    "nm20_2of4": {
+      "vcd_cycles": 1402,
+      "packets": 60,
+      "mixed_k": 60,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm_tail": {
+      "vcd_cycles": 2060,
+      "packets": 84,
+      "mixed_k": 84,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    },
+    "nm20_zeros": {
+      "vcd_cycles": 1401,
+      "packets": 30,
+      "mixed_k": 0,
+      "checks": [
+        "full NM payload stable under backpressure",
+        "physical ACC selection",
+        "selected A/B values",
+        "C reconstructed from actual MAC handshakes",
+        "read totals"
+      ]
+    }
+  }
+}

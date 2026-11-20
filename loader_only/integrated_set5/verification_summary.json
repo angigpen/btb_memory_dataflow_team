@@ -1,0 +1,26 @@
+{
+  "variants": 6,
+  "measurement_rows": 330,
+  "cases_per_variant": {
+    "plan1_acc2": 52,
+    "plan1_acc4": 52,
+    "plan2_acc2": 52,
+    "plan2_acc4": 52,
+    "plan3_acc2": 52,
+    "plan3_acc4": 52
+  },
+  "waveforms": 18,
+  "clock_mhz_assumed": 100,
+  "power_basis": "Illustrative activity coefficients, not measured FPGA power",
+  "sources": {
+    "memory_commit": "f0bd24f62b54ce5adfdb85c8f9ac328698f7f1b9",
+    "sparsity_commit": "259d931324f16d8814141e72430e3f6f6ddf1420",
+    "compute_commit": "4a9ac6d695f441915b7061323e66a20133903491"
+  },
+  "cross_variant_checks": [
+    "Same fixture per case",
+    "Same read totals for same ACC count across plans",
+    "Plan2/3 same cycles under uniform scalar latency"
+  ],
+  "comparison_table_cases": 51
+}

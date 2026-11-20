@@ -1,0 +1,2 @@
+input_packets,compute_packets,group_events,mixed_k_packets,frontend_stall,mac_stall,memory_wait,mul,pass,neg,shift,ram_accesses,classify_values,payload_toggles
+120,30,30,0,10,56,256,0,0,0,0,192,288,1889

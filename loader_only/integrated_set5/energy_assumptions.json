@@ -1,0 +1,13 @@
+{
+  "request_pj": 100,
+  "read_byte_pj": 50,
+  "ram_word_pj": 12,
+  "write_word_pj": 30,
+  "classify_value_pj": 2,
+  "multiply_pj": 8,
+  "fast_op_pj": 2,
+  "accumulate_pj": 3,
+  "cycle_pj": 15,
+  "static_mw": 0,
+  "clock_mhz": 100
+}
